@@ -1,4 +1,5 @@
-**/.vscode/*
+**/.vscode/
+**/__pycache__/
 
 # Prerequisites
 *.d
@@ -32,3 +33,9 @@
 *.exe
 *.out
 *.app
+
+#Temporary VI files
+*.vi
+
+#Trace files
+trace.vcd
