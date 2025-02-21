@@ -29,7 +29,7 @@ SC_MODULE(AXI_SUBORDINATE)
 
 	SC_CTOR(AXI_SUBORDINATE)
 	{
-		SC_CTHREAD(thread, ACLK.neg());
+		SC_CTHREAD(thread, ACLK);
 		async_reset_signal_is(ARESETn, false);
 	}
 
