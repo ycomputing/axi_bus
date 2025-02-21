@@ -1,9 +1,0 @@
-{
-	"makefile.launchConfigurations": [
-		{
-			"cwd": "/home/changp/joy/axi_bus",
-			"binaryPath": "/home/changp/joy/axi_bus/project.exe",
-			"binaryArgs": []
-		}
-	]
-}
