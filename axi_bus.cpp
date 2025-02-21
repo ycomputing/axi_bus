@@ -533,24 +533,39 @@ bool AXI_BUS::progress_update(std::queue<axi_bus_info_t>& q)
 	auto& progress = iter->second;
 	auto& trans_in_progress = std::get<0>(progress);
 	int8_t count_done = std::get<1>(progress);
-	if (count_done >= trans_in_progress.length)
+
+	if (count_done < trans_in_progress.length)
 	{
-		// We got more data than required length
+		// be careful to update original data
+		trans_in_progress.data[count_done] = info.data;
+		count_done ++;
+		std::get<1>(progress) = count_done;
+	}
+	else if (info.is_last)
+	{
+		// full already, waiting for transaction processing.
+		log_detail = "done=" + std::to_string(count_done) + "/"
+			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
+		log(__FUNCTION__, "FULL WAIT", log_detail);
+
+		return true;
+	}
+	else
+	{		// We got more data than required length
 		log(__FUNCTION__, "TOO MUCH DATA", bus_info_to_string(info));
 		progress_dump();
 		SC_REPORT_FATAL("TOO MUCH DATA", "q_recv_X");
 	}
 
-	// be careful to update original data
-	trans_in_progress.data[count_done] = info.data;
-	std::get<1>(progress) = count_done + 1;
+
+	// count_done is increased.
 
 	if (info.is_last)
 	{
-		if (count_done != trans_in_progress.length - 1)
+		if (count_done != trans_in_progress.length)
 		{
 			// We got last data when there must be more
-			log_detail = "done=" + std::to_string(count_done + 1) + "/"
+			log_detail = "done=" + std::to_string(count_done) + "/"
 			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
 			log(__FUNCTION__, "PREMATURE LAST", log_detail);
 			progress_dump();
@@ -558,16 +573,16 @@ bool AXI_BUS::progress_update(std::queue<axi_bus_info_t>& q)
 		}
 		// progress is 100%.
 		// do not pop, do not erase progress yet.
-		log_detail = "done=" + std::to_string(count_done + 1) + "/"
+		log_detail = "done=" + std::to_string(count_done) + "/"
 			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "GET FULL", log_detail);
+		log(__FUNCTION__, "FULL NEW", log_detail);
 		return true;
 
 	}
 	else	// not the last data
 	{
 		q.pop();
-		log_detail = "done=" + std::to_string(count_done + 1) + "/"
+		log_detail = "done=" + std::to_string(count_done) + "/"
 			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
 		log(__FUNCTION__, "PLUS ONE", log_detail);
 	}
