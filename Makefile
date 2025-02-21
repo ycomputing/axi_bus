@@ -27,3 +27,9 @@ view:	$(EXE)
 
 clean:
 	rm -f $(OBJS) $(EXE) $(DEPEND) *.out trace.vcd
+
+test:	$(EXE)
+	python3 gen_random_access.py
+	./$(EXE) > run.out
+	python3 compare_memory.py
+
