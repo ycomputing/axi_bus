@@ -25,10 +25,6 @@ int sc_main(int, char*[])
 	AXI_MANAGER m("m");
 	AXI_SUBORDINATE s("s");
 	RESETTER r("r");
-
-	axi_trans_t trans;
-	trans.addr = 0;
-	
 	
 	r.ARESETn(ARESETn);
 
@@ -39,13 +35,9 @@ int sc_main(int, char*[])
 	bus.response_S(response_S);
 	bus.request_S(request_S);
 
-	m.ACLK(ACLK);
-	m.ARESETn(ARESETn);
 	m.request(request_M);
 	m.response(response_M);
 
-	s.ACLK(ACLK);
-	s.ARESETn(ARESETn);
 	s.request(request_S);
 	s.response(response_S);
 

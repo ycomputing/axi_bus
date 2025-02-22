@@ -13,9 +13,6 @@
 
 SC_MODULE(AXI_SUBORDINATE)
 {
-	sc_in<bool>	ACLK;
-	sc_in<bool>	ARESETn;
-
 	sc_fifo_in<axi_trans_t> request;
 	sc_fifo_out<axi_trans_t> response;
 
@@ -29,13 +26,10 @@ SC_MODULE(AXI_SUBORDINATE)
 
 	SC_CTOR(AXI_SUBORDINATE)
 	{
-		SC_CTHREAD(thread, ACLK);
-		async_reset_signal_is(ARESETn, false);
+		SC_THREAD(thread);
 	}
 
 	void thread();
-	void on_clock();
-	void on_reset();
 
 	void fifo_manager();
 

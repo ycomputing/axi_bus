@@ -12,58 +12,48 @@ using namespace sc_dt;
 
 #include "axi_manager.h"
 
-void AXI_MANAGER::thread()
+void AXI_MANAGER::thread_sender()
 {
-	on_reset();
-	wait();
-
 	while(true)
 	{
-		on_clock();
-		wait();
+		fifo_sender();
 	}
 }
 
-void AXI_MANAGER::on_clock()
+void AXI_MANAGER::thread_receiver()
 {
-	fifo_manager();
+	while(true)
+	{
+		fifo_receiver();
+	}
 }
 
-void AXI_MANAGER::on_reset()
+void AXI_MANAGER::fifo_receiver()
 {
+	std::string log_detail = "";
+	axi_trans_t trans;
 
+	trans = response.read();
+	if (trans.is_write == false)
+	{
+		uint64_t amount_addr_inc = DATA_WIDTH / 8;
+		// update memory
+		for (int i = 0; i < trans.length; i ++)
+		{
+			uint64_t addr = trans.addr + amount_addr_inc * i;
+			map_memory[addr] = trans.data[i];
+		}
+	}
+
+	log_detail = AXI_BUS::transaction_to_string(trans);
+	log(__FUNCTION__, "GOT RESPONSE", log_detail);
 }
 
-void AXI_MANAGER::log(std::string source, std::string action, std::string detail)
-{
-	std::string log_source = "MANAGER:" + source;
-	AXI_BUS::log(log_source, action, detail);
-}
-
-void AXI_MANAGER::fifo_manager()
+void AXI_MANAGER::fifo_sender()
 {
 	std::string log_action = CHANNEL_UNKNOWN;
 	std::string log_detail = "";
-	bool is_accepted;
 	axi_trans_t trans;
-
-	// check response first
-	is_accepted = response.nb_read(trans);
-	if (is_accepted)
-	{
-		if (trans.is_write == false)
-		{
-			uint64_t amount_addr_inc = DATA_WIDTH / 8;
-			// update memory
-			for (int i = 0; i < trans.length; i ++)
-			{
-				uint64_t addr = trans.addr + amount_addr_inc * i;
-				map_memory[addr] = trans.data[i];
-			}
-		}
-		log_detail = AXI_BUS::transaction_to_string(trans);
-		log(__FUNCTION__, "GOT RESPONSE", log_detail);
-	}
 
 	// Are there requests to send?
 
@@ -72,6 +62,9 @@ void AXI_MANAGER::fifo_manager()
 		// No job to do.
 		log_action = "empty q";
 		log(__FUNCTION__, log_action, log_detail);
+		
+		// wait until end of simulation
+		wait(100, SC_SEC);
 		return;
 	}
 
@@ -91,20 +84,26 @@ void AXI_MANAGER::fifo_manager()
 	if (stamp_q > stamp_now)
 	{
 		// The time has not come yet
+		uint64_t amount_wait = stamp_q - stamp_now;
 		log_action = CHANNEL_HOLD;
 		log_detail = "scheduled=" + std::to_string(stamp_q)
-				+ ",now=" + std::to_string(stamp_now);
+				+ ", now=" + std::to_string(stamp_now)
+				+ ", waiting=" + std::to_string(amount_wait);
 		log(__FUNCTION__, log_action, log_detail);
+		wait(amount_wait, SC_NS);
 		return;
 	}
 
-	is_accepted = request.nb_write(trans);
-	if (is_accepted)
-	{
-		log_detail = AXI_BUS::transaction_to_string(trans);
-		log(__FUNCTION__, "request", log_detail);
-		queue_access.pop();
-	}
+	request.write(trans);
+	log_detail = AXI_BUS::transaction_to_string(trans);
+	log(__FUNCTION__, "SENT REQUEST", log_detail);
+	queue_access.pop();
+}
+
+void AXI_MANAGER::log(std::string source, std::string action, std::string detail)
+{
+	std::string log_source = "MANAGER:" + source;
+	AXI_BUS::log(log_source, action, detail);
 }
 
 void AXI_MANAGER::read_access_csv()
@@ -145,9 +144,9 @@ void AXI_MANAGER::read_access_csv()
 		//
 		// stamp: integer, simulation time in nano second
 		// R/W: character, 'R' or 'W', to indicate read or write action
-		// address: hex string, 64 bit, address to read or write
+		// address: hex string, ADDR_WIDTH bit, address to read or write
 		// length: integer, how many data to transfer at one transaction
-		// data: hex string, 128 bit, data to transfer
+		// data: hex string, DATA_WIDTH bit, data to transfer
 
 		std::getline(iss, token1, ',');
 		std::getline(iss, token2, ',');

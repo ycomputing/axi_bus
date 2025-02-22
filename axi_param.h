@@ -5,18 +5,18 @@
 // https://developer.arm.com/documentation/ihi0022/latest/
 
 
-#define ID_R_WIDTH	32
 #define ADDR_WIDTH	64
 #define DATA_WIDTH	128
 
 #define BUS_ACCESS_READ 'R'
 #define BUS_ACCESS_WRITE 'W'
 
-typedef sc_dt::sc_bigint<128> bus_data_t;
+typedef sc_dt::sc_bigint<DATA_WIDTH> bus_data_t;
 
 #define BUS_DATA_ZERO	0
 
 // Maximum number of data with one address
+// Too big value may cause program crash
 #define AXI_TRANSACTION_LENGTH_MAX	100
 
 // name of channels

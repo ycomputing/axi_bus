@@ -4,7 +4,7 @@ import random
 def random_gen_random_access():
 	mode = "any"
 	length_max = random.randint(1, 100)
-	is_length_variable = random.choice([True, False])
+	is_length_variable = random.choice([False, True])
 	stamp_start = random.randint(100, 500)
 	stamp_step_min = random.randint(1, 10)
 	n = random.randint(1, 1000)

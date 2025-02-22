@@ -95,17 +95,32 @@ SC_MODULE(AXI_BUS)
 	std::queue<axi_bus_info_t> q_recv_AR;
 	std::queue<axi_bus_info_t> q_recv_R;
 
+	// To access many queues from many threads, we need to use mutex
+	std::mutex mutex_q;
+	sc_event_queue event_something_to_send;
+
 	std::unordered_map<uint32_t, tuple_progress_t> map_progress;
 
 	SC_CTOR(AXI_BUS)
 	{
-		SC_CTHREAD(thread, ACLK);
-		async_reset_signal_is(ARESETn, false);
+		SC_THREAD(thread_clock);
+		sensitive << ACLK << ARESETn;
+		SC_THREAD(thread_request_M);
+		SC_THREAD(thread_response_M);
+		sensitive << event_something_to_send;
+		SC_THREAD(thread_request_S);
+		sensitive << event_something_to_send;
+		SC_THREAD(thread_response_S);
 	}
 
-	void thread();
 	void on_clock();
 	void on_reset();
+
+	void thread_clock();
+	void thread_request_M();
+	void thread_response_M();
+	void thread_request_S();
+	void thread_response_S();
 
 	axi_bus_info_t create_null_info();
 	void send_info(int channel, axi_bus_info_t& info);
@@ -119,7 +134,6 @@ SC_MODULE(AXI_BUS)
 	void set_valid(int channel, bool value);
 
 	void channel_transaction();
-	void fifo_transaction();
 
 	static std::string transaction_to_string(const axi_trans_t& trans);
 	static std::string bus_info_to_string(const axi_bus_info_t& info);
@@ -129,7 +143,7 @@ SC_MODULE(AXI_BUS)
 	void transaction_response_S();
 	void transaction_response_M();
 	void transaction_request_S();
-	bool transaction_send_q(sc_fifo_out<axi_trans_t>& fifo_out, std::queue<axi_bus_info_t>& q);
+	std::string transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, axi_bus_info_t& info);
 
 	bool progress_create(axi_bus_info_t& info, bool is_write);
 	void progress_delete(axi_bus_info_t& info);
@@ -142,6 +156,7 @@ SC_MODULE(AXI_BUS)
 	static void log(std::string source, std::string action, std::string detail);
 
 	uint32_t generate_transaction_id();
+	void wait_enough_delta_cycles();
 
 	void progress_dump();
 };

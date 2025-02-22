@@ -10,6 +10,6 @@ if __name__ == '__main__':
 #	g.gen_random_access(mode="any", length_max=100, is_length_variable=True, n=1000)
 #	g.gen_random_access(mode="any", length_max=8, is_length_variable=True, stamp_step_min=10, n=1000)
 #	g.gen_random_access(mode="any", length_max=4, is_length_variable=True, stamp_step_min=2, stamp_step_max=4, n=1000)
-	g.gen_random_access(mode="any", length_max=8, is_length_variable=True, stamp_step_min=1, stamp_step_max=2, n=1000)
-#	g.gen_random_access(mode="any", length_max=1, is_length_variable=False, n=10)
+#	g.gen_random_access(mode="any", length_max=8, is_length_variable=True, stamp_step_min=1, stamp_step_max=2, n=1000)
+	g.gen_random_access(mode="any", length_max=1, is_length_variable=False, n=10)
 #	g.gen_random_access(mode="any", length_max=1, is_length_variable=False, n=1000)

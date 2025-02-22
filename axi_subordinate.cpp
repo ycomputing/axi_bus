@@ -13,26 +13,18 @@ using namespace sc_dt;
 
 #include "axi_subordinate.h"
 
+
+#define AXI_SUBORDINATE_LATENCY_NS 0
+
 void AXI_SUBORDINATE::thread()
 {
-	on_reset();
-	wait();
+	log(__FUNCTION__, "thread start", "");
+	read_memory_csv();
 
 	while(true)
 	{
-		on_clock();
-		wait();
+		fifo_manager();
 	}
-}
-
-void AXI_SUBORDINATE::on_clock()
-{
-	fifo_manager();
-}
-
-void AXI_SUBORDINATE::on_reset()
-{
-	has_pending_response = false;
 }
 
 void AXI_SUBORDINATE::fifo_manager()
@@ -40,42 +32,14 @@ void AXI_SUBORDINATE::fifo_manager()
 	std::string log_action;
 	std::string log_detail;
 
-	bool is_accepted;
 	axi_trans_t trans;
 
-	if (has_pending_response)
-	{
-		is_accepted = response.nb_write(trans_pending);
-		if (is_accepted)
-		{
-			has_pending_response = false;
-			log(__FUNCTION__, "SENT_PENDING", AXI_BUS::transaction_to_string(trans_pending));
-		}
-		else
-		{
-			// still pending. do not receive incoming requests
-			// try to send the response again on next clock.
-			log(__FUNCTION__, "STILL_PENDING", AXI_BUS::transaction_to_string(trans_pending));
-			return;
-		}
-	}
-
-	// No pending response, now can receive incoming requests.
-	is_accepted = request.nb_read(trans);
-	if (is_accepted == false)
-	{
-		// No request now
-		log(__FUNCTION__, "NO_REQUEST", "");
-		return;
-	}
-
+	// Receive incoming requests. This is a blocking read.
+	trans = request.read();
 	log(__FUNCTION__, "GOT_REQUEST", AXI_BUS::transaction_to_string(trans));
 
 	// give delay
-	if (AXI_SUBORDINATE_LATENCY > 0)
-	{
-		wait (AXI_SUBORDINATE_LATENCY);
-	}
+	wait (AXI_SUBORDINATE_LATENCY_NS, SC_NS);
 
 	uint64_t amount_addr_inc = DATA_WIDTH / 8;
 	for (int i = 0; i < trans.length; i ++)
@@ -100,18 +64,8 @@ void AXI_SUBORDINATE::fifo_manager()
 		}
 	}
 
-	is_accepted = response.nb_write(trans);
-	if (is_accepted == false)
-	{
-		log(__FUNCTION__, "START_PENDING", AXI_BUS::transaction_to_string(trans));
-		has_pending_response = true;
-		trans_pending = trans;
-	}
-	else
-	{
-		log(__FUNCTION__, "SENT_RESPONSE", AXI_BUS::transaction_to_string(trans));
-	}
-
+	response.write(trans);
+	log(__FUNCTION__, "SENT_RESPONSE", AXI_BUS::transaction_to_string(trans));
 }
 
 void AXI_SUBORDINATE::read_memory_csv()

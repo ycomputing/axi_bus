@@ -10,9 +10,6 @@
 
 SC_MODULE(AXI_MANAGER)
 {
-	sc_in<bool>	ACLK;
-	sc_in<bool>	ARESETn;
-
 	sc_fifo_out<axi_trans_t> request;
 	sc_fifo_in<axi_trans_t> response;
 
@@ -26,16 +23,16 @@ SC_MODULE(AXI_MANAGER)
 
 	SC_CTOR(AXI_MANAGER)
 	{
-		SC_CTHREAD(thread, ACLK);
-		async_reset_signal_is(ARESETn, false);
+		SC_THREAD(thread_sender);
+		SC_THREAD(thread_receiver);
 	}
 
-	void thread();
-	void on_clock();
-	void on_reset();
+	void thread_sender();
+	void thread_receiver();
+	void fifo_sender();
+	void fifo_receiver();
 
 	void log(std::string source, std::string action, std::string detail);
-	void fifo_manager();
 
 	uint32_t generate_transaction_id();
 

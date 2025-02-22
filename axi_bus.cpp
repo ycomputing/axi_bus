@@ -12,43 +12,70 @@ using namespace sc_dt;
 
 #include "axi_bus.h"
 
+// when you want to enable debug messages
+// (comment out or) uncomment the following line.
+#define DEBUG_AXI_BUS
+
 // When you (don't) want to see channel signal activity
 // (comment out or) uncomment the following line.
-#define DEBUG_AXI_BUS_CHANNEL
+//#define DEBUG_AXI_BUS_CHANNEL
 
 // When you want to see progress dump
-#define DEBUG_AXI_BUS_PROGRESS
+//#define DEBUG_AXI_BUS_PROGRESS
 
-void AXI_BUS::thread()
+void AXI_BUS::thread_clock()
 {
-	on_reset();
-	wait();
-
 	while(true)
 	{
-		on_clock();
+		if (ARESETn == 0)
+		{
+			on_reset();
+		}
+		else if (ACLK.posedge())
+		{
+			on_clock();
+		}
 		wait();
 	}
 }
 
-
 void AXI_BUS::on_clock()
 {
-	transaction_request_M();
-	transaction_response_S();
-
 	channel_transaction();
-
-	transaction_response_M();
-	transaction_request_S();
 }
 
-void AXI_BUS::fifo_transaction ()
+void AXI_BUS::thread_request_M()
 {
-	transaction_request_M();
-	transaction_response_S();
-	transaction_response_M();
-	transaction_request_S();
+	while(true)
+	{
+		transaction_request_M();
+	}
+}
+
+void AXI_BUS::thread_response_M()
+{
+	while(true)
+	{
+		transaction_response_M();
+		wait();
+	}
+}
+
+void AXI_BUS::thread_request_S()
+{
+	while(true)
+	{
+		transaction_request_S();
+		wait();
+	}
+}
+
+void AXI_BUS::thread_response_S()
+{
+	while(true)
+	{
+		transaction_response_S();
+	}
 }
 
 void AXI_BUS::on_reset()
@@ -220,6 +247,8 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 	std::string log_action = CHANNEL_UNKNOWN;
 	std::string log_detail = "";
 
+	mutex_q.lock();
+	
 	if (is_ready(channel) == 0)
 	{
 		set_ready(channel, true);
@@ -229,6 +258,7 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 	{
 		axi_bus_info_t info = recv_info(channel);
 		q.push(info);
+		event_something_to_send.notify(SC_ZERO_TIME);
 		log_action = CHANNEL_RECV;
 		log_detail = bus_info_to_string(info);
 	}
@@ -236,7 +266,9 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 	{
 		log_action = CHANNEL_WAITV;
 	}
+
 	log(channel, log_action, log_detail);
+	mutex_q.unlock();
 }
 
 void AXI_BUS::channel_sender(int channel, std::queue<axi_bus_info_t>& q)
@@ -244,6 +276,8 @@ void AXI_BUS::channel_sender(int channel, std::queue<axi_bus_info_t>& q)
 	std::string log_action = CHANNEL_UNKNOWN;
 	std::string log_detail = "";
 	axi_bus_info_t info;
+
+	mutex_q.lock();
 
 	if (!q.empty())
 	{
@@ -310,6 +344,7 @@ void AXI_BUS::channel_sender(int channel, std::queue<axi_bus_info_t>& q)
 	}
 
 	log(channel, log_action, log_detail);
+	mutex_q.unlock();
 }
 
 void AXI_BUS::log(int channel, std::string action, std::string detail)
@@ -322,10 +357,13 @@ void AXI_BUS::log(int channel, std::string action, std::string detail)
 
 void AXI_BUS::log(std::string source, std::string action, std::string detail)
 {
+
+#ifdef DEBUG_AXI_BUS
 	std::string out;
 	out = sc_time_stamp().to_string() + ":" + source
 		+ ":" + action + ":" + detail;
 	std::cout << out << std::endl;
+#endif
 
 	return;
 }
@@ -348,36 +386,45 @@ std::string AXI_BUS::get_channel_name(int channel)
 
 void AXI_BUS::channel_transaction()
 {
+	wait_enough_delta_cycles();
+
 	channel_receiver(CHANNEL_AW, q_recv_AW);
 	channel_receiver(CHANNEL_W, q_recv_W);
-	channel_receiver(CHANNEL_B, q_recv_B);
 	channel_receiver(CHANNEL_AR, q_recv_AR);
-	channel_receiver(CHANNEL_R, q_recv_R);
+
+	wait_enough_delta_cycles();
 
 	channel_sender(CHANNEL_AW, q_send_AW);
 	channel_sender(CHANNEL_W, q_send_W);
-	channel_sender(CHANNEL_B, q_send_B);
 	channel_sender(CHANNEL_AR, q_send_AR);
+
+	wait_enough_delta_cycles();
+
+	channel_receiver(CHANNEL_B, q_recv_B);
+	channel_receiver(CHANNEL_R, q_recv_R);
+
+	wait_enough_delta_cycles();
+	
+	channel_sender(CHANNEL_B, q_send_B);
 	channel_sender(CHANNEL_R, q_send_R);
 }
 
 void AXI_BUS::transaction_request_M()
 {
 	axi_trans_t trans;
-	bool has_trans;
 
-	has_trans = request_M.nb_read(trans);
-	if (!has_trans)
-	{
-		return;
-	}
+	// blocking read
+	trans = request_M.read();
+	log(__FUNCTION__, "GOT_REQUEST", transaction_to_string(trans));
 
 	uint32_t id = generate_transaction_id();
-
 	axi_bus_info_t info = create_null_info();
 	info.id = id;
 	info.addr = trans.addr;
 	info.len = trans.length - 1;
+
+
+	mutex_q.lock();
 
 	if (trans.is_write)
 	{
@@ -399,18 +446,19 @@ void AXI_BUS::transaction_request_M()
 		progress_create(info, trans.is_write);
 		q_send_AR.push(info);
 	}
+
+	mutex_q.unlock();
 }
 
 void AXI_BUS::transaction_response_S()
 {
 	axi_trans_t trans;
-	bool has_trans;
 
-	has_trans = response_S.nb_read(trans);
-	if (!has_trans)
-	{
-		return;
-	}
+	// blocking read
+	trans = response_S.read();
+	log(__FUNCTION__, "GOT_RESPONSE", transaction_to_string(trans));
+
+	mutex_q.lock();
 
 	uint32_t id;
 	tuple_progress_t progress;
@@ -437,6 +485,8 @@ void AXI_BUS::transaction_response_S()
 		log(__FUNCTION__, "Response not in progress",transaction_to_string(trans));
 		progress_dump();
 		SC_REPORT_FATAL("Response, not in progress", transaction_to_string(trans).c_str());
+
+		mutex_q.unlock();
 		return;
 	}
 
@@ -461,6 +511,8 @@ void AXI_BUS::transaction_response_S()
 			q_send_R.push(info);
 		}
 	}
+
+	mutex_q.unlock();
 }
 
 bool AXI_BUS::progress_create(axi_bus_info_t& info, bool is_write)
@@ -590,17 +642,13 @@ bool AXI_BUS::progress_update(std::queue<axi_bus_info_t>& q)
 	return false;
 }
 
-bool AXI_BUS::transaction_send_q(sc_fifo_out<axi_trans_t>& fifo_out, std::queue<axi_bus_info_t>& q)
+std::string AXI_BUS::transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, axi_bus_info_t& info)
 {
-	bool is_accepted;
 	std::string log_detail;
 
-	if (q.empty())
-	{
-		return false;
-	}
+	// This function does not lock the queue.
+	// You must lock the queue before calling this function if needed.
 
-	axi_bus_info_t& info = q.front();
 	auto iter = map_progress.find(info.id);
 	if (iter == map_progress.end())
 	{
@@ -613,74 +661,89 @@ bool AXI_BUS::transaction_send_q(sc_fifo_out<axi_trans_t>& fifo_out, std::queue<
 
 	auto& progress = iter->second;
 	auto& trans_in_progress = std::get<0>(progress);
-	is_accepted = fifo_out.nb_write(trans_in_progress);
-	if (is_accepted)
-	{
-		log_detail = "name=";
-		log_detail += fifo_out.name();
-		log_detail += ", " + transaction_to_string(trans_in_progress);
-		log(__FUNCTION__, "SENT TRANS TO FIFO", log_detail);
-		return true;
-	}
-	else
-	{
-		// Fifo is full, try again in the future.
-		log(__FUNCTION__, "FIFO FULL", transaction_to_string(trans_in_progress));
-	}
-	return false;
+	fifo_out.write(trans_in_progress);
+	log_detail = transaction_to_string(trans_in_progress);
+	return log_detail;
 }
 
 void AXI_BUS::transaction_response_M()
 {
-	bool is_accepted;
+	std::string log_detail;
+	mutex_q.lock();
 
 	// write transaction
-	is_accepted = transaction_send_q(response_M, q_recv_B);
-	if (is_accepted)
+	if (q_recv_B.empty())
 	{
-		axi_bus_info_t& info = q_recv_B.front();
-		progress_delete(info);
+		mutex_q.unlock();
+	}
+	else
+	{
+		axi_bus_info_t info = q_recv_B.front();
 		q_recv_B.pop();
+		mutex_q.unlock();
+		log_detail = transaction_send_info(response_M, info);
+		log(__FUNCTION__, "SENT RESPONSE", log_detail);
 	}
 
 	// read transaction
+	mutex_q.lock();
 	bool is_completed = progress_update(q_recv_R);
-	if (is_completed)
+	if (!is_completed)
 	{
-		is_accepted = transaction_send_q(response_M, q_recv_R);
-		if (is_accepted)
-		{
-			axi_bus_info_t& info = q_recv_R.front();
-			progress_delete(info);
-			q_recv_R.pop();
-		}
+		mutex_q.unlock();
 	}
+	else
+	{
+		axi_bus_info_t info = q_recv_R.front();
+		q_recv_R.pop();
+		mutex_q.unlock();
+	
+		transaction_send_info(response_M, info);
+		mutex_q.lock();
+		progress_delete(info);
+		mutex_q.unlock();
+	}
+
 }
 
 void AXI_BUS::transaction_request_S()
 {
-	bool is_accepted;
+
+	mutex_q.lock();
+
 	if (!q_recv_AW.empty())
 	{
 		progress_create(q_recv_AW.front(), true);
 		q_recv_AW.pop();
 	}
 
+	mutex_q.unlock();
+	mutex_q.lock();
+
 	bool is_completed = progress_update(q_recv_W);
 	if (is_completed)
 	{
-		is_accepted = transaction_send_q(request_S, q_recv_W);
-		if (is_accepted)
-		{
-			q_recv_W.pop();
-		}
+		axi_bus_info_t info = q_recv_W.front();
+		q_recv_W.pop();
+		mutex_q.unlock();
+		transaction_send_info(request_S, info);
+	}
+	else
+	{
+		mutex_q.unlock();
 	}
 
-	is_accepted = transaction_send_q(request_S, q_recv_AR);
-	if (is_accepted)
+	mutex_q.lock();
+
+	if (!q_recv_AR.empty())
 	{
+		axi_bus_info_t info = q_recv_AR.front();
 		q_recv_AR.pop();
+		mutex_q.unlock();
+		transaction_send_info(request_S, info);
 	}
+
+	mutex_q.unlock();
 }
 
 uint32_t AXI_BUS::generate_transaction_id()
@@ -688,6 +751,15 @@ uint32_t AXI_BUS::generate_transaction_id()
 	static uint32_t id = 0;
 	id ++;
 	return id;
+}
+
+void AXI_BUS::wait_enough_delta_cycles()
+{
+	const int ENOUGH_DELTA_CYCLES = 10;
+	for (int i = 0; i < ENOUGH_DELTA_CYCLES; i++)
+	{
+		wait(SC_ZERO_TIME);
+	}
 }
 
 std::string AXI_BUS::bus_info_to_string(const axi_bus_info_t& info)
