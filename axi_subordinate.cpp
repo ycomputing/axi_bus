@@ -13,14 +13,11 @@ using namespace sc_dt;
 
 #include "axi_subordinate.h"
 
-
-#define AXI_SUBORDINATE_LATENCY_NS 0
+#define AXI_SUBORDINATE_READ_LATENCY_NS 2
+#define AXI_SUBORDINATE_WRITE_LATENCY_NS 3
 
 void AXI_SUBORDINATE::thread()
 {
-	log(__FUNCTION__, "thread start", "");
-	read_memory_csv();
-
 	while(true)
 	{
 		fifo_manager();
@@ -39,7 +36,14 @@ void AXI_SUBORDINATE::fifo_manager()
 	log(__FUNCTION__, "GOT_REQUEST", AXI_BUS::transaction_to_string(trans));
 
 	// give delay
-	wait (AXI_SUBORDINATE_LATENCY_NS, SC_NS);
+	if (trans.is_write)
+	{
+		wait (AXI_SUBORDINATE_WRITE_LATENCY_NS, SC_NS);
+	}
+	else
+	{
+		wait (AXI_SUBORDINATE_READ_LATENCY_NS, SC_NS);
+	}
 
 	uint64_t amount_addr_inc = DATA_WIDTH / 8;
 	for (int i = 0; i < trans.length; i ++)

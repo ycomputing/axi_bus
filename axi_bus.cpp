@@ -201,7 +201,7 @@ axi_bus_info_t AXI_BUS::create_null_info()
 {
 	axi_bus_info_t info;
 
-	info.id = CHANNEL_X;
+	info.id = 0;
 	info.addr = 0;
 	info.len = 0;
 	info.data = 0;
@@ -212,9 +212,6 @@ axi_bus_info_t AXI_BUS::create_null_info()
 axi_bus_info_t AXI_BUS::recv_info(int channel)
 {
 	axi_bus_info_t info = create_null_info();
-
-	info.channel = CHANNEL_X;
-	info.id = 0;
 
 	switch(channel)
 	{
@@ -627,7 +624,7 @@ bool AXI_BUS::progress_update(std::queue<axi_bus_info_t>& q)
 		// do not pop, do not erase progress yet.
 		log_detail = "done=" + std::to_string(count_done) + "/"
 			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "FULL NEW", log_detail);
+		log(__FUNCTION__, "LAST ONE", log_detail);
 		return true;
 
 	}
@@ -751,6 +748,10 @@ uint32_t AXI_BUS::generate_transaction_id()
 {
 	static uint32_t id = 0;
 	id ++;
+	if (id == 0)
+	{
+		id ++;
+	}
 	return id;
 }
 

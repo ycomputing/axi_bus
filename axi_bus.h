@@ -32,7 +32,6 @@ typedef std::tuple<axi_trans_t, uint8_t> tuple_progress_t;
 
 typedef struct
 {
-	int			channel;
 	uint32_t	id;
 	uint64_t	addr;
 	uint8_t		len; // length - 1

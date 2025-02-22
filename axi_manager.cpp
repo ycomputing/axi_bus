@@ -68,7 +68,7 @@ void AXI_MANAGER::fifo_sender()
 		return;
 	}
 
-	// queue access tuple: (timestamp, rw, address, length, data)
+	// queue access tuple: (timestamp, transaction)
 	auto tuple = queue_access.front();
 	uint64_t stamp_q = std::get<0>(tuple);
 	trans = std::get<1>(tuple);
@@ -221,7 +221,7 @@ void AXI_MANAGER::read_access_csv()
 	}
 }
 
-void AXI_MANAGER::write_memory_csv(const char *filename)
+void AXI_MANAGER::write_memory_csv(const char* filename)
 {
 	std::ofstream f(filename);
 	if (!f.is_open())

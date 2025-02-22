@@ -37,5 +37,5 @@ SC_MODULE(AXI_MANAGER)
 	uint32_t generate_transaction_id();
 
 	void read_access_csv();
-	void write_memory_csv(const char* filename);
+	void write_memory_csv(const char* filename="m_memory_after.csv");
 };

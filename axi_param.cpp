@@ -29,7 +29,7 @@ bus_data_t bus_data_from_hex_string(const std::string& s)
 	return data;
 }
 
-std::string bus_data_to_hex_string(bus_data_t data)
+std::string bus_data_to_hex_string(const bus_data_t& data)
 {
 	std::stringstream ss;
 	ss << std::setfill('0') << std::setw(DATA_WIDTH / 4) << data.to_string(sc_dt::SC_HEX);

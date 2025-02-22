@@ -72,10 +72,10 @@ int sc_main(int, char*[])
 	s.read_memory_csv();
 	
 	sc_start(SIMULATION_TIME, SC_NS);
+
+	m.write_memory_csv();
+	s.write_memory_csv();
+
 	sc_close_vcd_trace_file(f);
-
-	m.write_memory_csv("m_memory_after.csv");
-	s.write_memory_csv("s_memory_after.csv");
-
 	return (0);
 }
