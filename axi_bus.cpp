@@ -698,7 +698,8 @@ void AXI_BUS::transaction_response_M()
 		q_recv_R.pop();
 		mutex_q.unlock();
 	
-		transaction_send_info(response_M, info);
+		log_detail = transaction_send_info(response_M, info);
+		log(__FUNCTION__, "SENT RESPONSE", log_detail);
 		mutex_q.lock();
 		progress_delete(info);
 		mutex_q.unlock();
