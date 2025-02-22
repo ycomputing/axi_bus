@@ -28,6 +28,9 @@ view:	$(EXE)
 clean:
 	rm -f $(OBJS) $(EXE) $(DEPEND) *.out trace.vcd
 
+run:	$(EXE)
+	./$(EXE) > run.out
+
 test:	$(EXE)
 	python3 gen_random_access.py
 	./$(EXE) > run.out

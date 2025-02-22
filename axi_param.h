@@ -5,9 +5,6 @@
 // https://developer.arm.com/documentation/ihi0022/latest/
 
 
-// Maximum number of data with one address
-#define AXI_TRANSACTION_LENGTH_MAX	10
-
 #define ID_R_WIDTH	32
 #define ADDR_WIDTH	64
 #define DATA_WIDTH	128
@@ -18,6 +15,9 @@
 typedef sc_dt::sc_bigint<128> bus_data_t;
 
 #define BUS_DATA_ZERO	0
+
+// Maximum number of data with one address
+#define AXI_TRANSACTION_LENGTH_MAX	100
 
 // name of channels
 

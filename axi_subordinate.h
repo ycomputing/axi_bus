@@ -9,7 +9,7 @@
 #include "axi_bus.h"
 
 // latency in clock period.
-#define AXI_SUBORDINATE_LATENCY  10
+#define AXI_SUBORDINATE_LATENCY  20
 
 SC_MODULE(AXI_SUBORDINATE)
 {

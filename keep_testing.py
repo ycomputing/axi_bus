@@ -6,8 +6,8 @@ import compare_memory
 
 def test_one_random():
 	gen_random_access.random_gen_random_access()
-	#os.system ("./project.exe > run.out")
-	os.system ("./project.exe > /dev/null")
+	os.system ("./project.exe > run.out")
+	#os.system ("./project.exe > /dev/null")
 	is_different = compare_memory.compare_memory()
 	return is_different
 

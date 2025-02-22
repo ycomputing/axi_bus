@@ -72,7 +72,10 @@ void AXI_SUBORDINATE::fifo_manager()
 	log(__FUNCTION__, "GOT_REQUEST", AXI_BUS::transaction_to_string(trans));
 
 	// give delay
-	wait (AXI_SUBORDINATE_LATENCY);
+	if (AXI_SUBORDINATE_LATENCY > 0)
+	{
+		wait (AXI_SUBORDINATE_LATENCY);
+	}
 
 	uint64_t amount_addr_inc = DATA_WIDTH / 8;
 	for (int i = 0; i < trans.length; i ++)

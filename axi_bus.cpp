@@ -14,7 +14,7 @@ using namespace sc_dt;
 
 // When you (don't) want to see channel signal activity
 // (comment out or) uncomment the following line.
-//#define DEBUG_AXI_BUS_CHANNEL
+#define DEBUG_AXI_BUS_CHANNEL
 
 // When you want to see progress dump
 #define DEBUG_AXI_BUS_PROGRESS
