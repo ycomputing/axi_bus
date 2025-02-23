@@ -13,37 +13,88 @@ using namespace sc_dt;
 
 #include "axi_subordinate.h"
 
+#define NANOSECONDS_PER_SECOND (1000 * 1000 * 1000)
 #define AXI_SUBORDINATE_READ_LATENCY_NS 2
-#define AXI_SUBORDINATE_WRITE_LATENCY_NS 3
+#define AXI_SUBORDINATE_WRITE_LATENCY_NS 300
 
-void AXI_SUBORDINATE::thread()
+void AXI_SUBORDINATE::thread_reader()
 {
 	while(true)
 	{
-		fifo_manager();
+		fifo_reader();
 	}
 }
 
-void AXI_SUBORDINATE::fifo_manager()
+void AXI_SUBORDINATE::thread_writer()
+{
+	while(true)
+	{
+		fifo_writer();
+		wait();
+	}
+}
+
+void AXI_SUBORDINATE::fifo_reader()
 {
 	std::string log_action;
 	std::string log_detail;
 
 	axi_trans_t trans;
+	int latency_ns = 0;
+	uint64_t stamp_schedule_ns;
+	uint64_t stamp_now_ns;
 
 	// Receive incoming requests. This is a blocking read.
 	trans = request.read();
 	log(__FUNCTION__, "GOT_REQUEST", AXI_BUS::transaction_to_string(trans));
 
-	// give delay
-	if (trans.is_write)
+	latency_ns = get_latency_ns(trans);
+	// +0.5 is needed for rounding
+	stamp_now_ns = sc_time_stamp().to_seconds() * NANOSECONDS_PER_SECOND + 0.5;
+	stamp_schedule_ns = stamp_now_ns + latency_ns;
+	mutex_q.lock();
+	event_something_to_send.notify (latency_ns, SC_NS);
+	q_send.push(when_trans_t(stamp_schedule_ns, trans));
+	mutex_q.unlock();
+
+	log_detail = "scheduled=" + std::to_string(stamp_schedule_ns);
+	log_detail = ", latency=" + std::to_string(latency_ns);
+	log_detail += ", " + AXI_BUS::transaction_to_string(trans);
+	log(__FUNCTION__, "SCHEDULE_RESPONSE", log_detail);
+}
+
+void AXI_SUBORDINATE::fifo_writer()
+{
+	std::string log_action;
+	std::string log_detail;
+
+	uint64_t stamp_schedule_ns;
+	uint64_t stamp_now_ns;
+	axi_trans_t trans;
+
+	mutex_q.lock();
+	if (q_send.empty())
 	{
-		wait (AXI_SUBORDINATE_WRITE_LATENCY_NS, SC_NS);
+		log(__FUNCTION__, "EMPTY_QUEUE", "");
+		mutex_q.unlock();
+		return;
 	}
-	else
+
+	when_trans_t when_trans = q_send.top();
+	stamp_schedule_ns = when_trans.stamp;
+	trans = when_trans.trans;
+	// +0.5 is needed for rounding
+	stamp_now_ns = sc_time_stamp().to_seconds() * NANOSECONDS_PER_SECOND + 0.5;
+
+	if (stamp_now_ns < stamp_schedule_ns)
 	{
-		wait (AXI_SUBORDINATE_READ_LATENCY_NS, SC_NS);
+		log(__FUNCTION__, "WAITING", "stamp_now=" + std::to_string(stamp_now_ns) + ", stamp_schedule=" + std::to_string(stamp_schedule_ns));
+		mutex_q.unlock();
+		return;
 	}
+
+	q_send.pop();
+	mutex_q.unlock();
 
 	uint64_t amount_addr_inc = DATA_WIDTH / 8;
 	for (int i = 0; i < trans.length; i ++)
@@ -72,6 +123,33 @@ void AXI_SUBORDINATE::fifo_manager()
 	log(__FUNCTION__, "SENT_RESPONSE", AXI_BUS::transaction_to_string(trans));
 }
 
+int AXI_SUBORDINATE::get_latency_ns(axi_trans_t trans)
+{
+	int latency_by_address = 0;
+	int latency_by_access_type = 0;
+	int latency_total = 0;
+
+	if(trans.is_write)
+	{
+		latency_by_access_type = AXI_SUBORDINATE_WRITE_LATENCY_NS;
+	}
+	else
+	{
+		latency_by_access_type = AXI_SUBORDINATE_READ_LATENCY_NS;
+	}
+
+	if (trans.addr < 0x8000100010001000)
+	{
+		latency_by_address = 10;
+	}
+	else
+	{
+		latency_by_address = 10000;
+	}
+
+	latency_total = latency_by_access_type + latency_by_address;
+	return latency_total;
+}
 void AXI_SUBORDINATE::read_memory_csv()
 {
 	map_memory.clear();
