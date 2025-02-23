@@ -102,7 +102,8 @@ void AXI_MANAGER::fifo_sender()
 
 void AXI_MANAGER::log(std::string source, std::string action, std::string detail)
 {
-	std::string log_source = "MANAGER:" + source;
+	std::string sep = ":";
+	std::string log_source = "MANAGER" + sep + name() + sep + source;
 	AXI_BUS::log(log_source, action, detail);
 }
 

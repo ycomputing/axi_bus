@@ -22,8 +22,8 @@ int sc_main(int, char*[])
 	sc_fifo<axi_trans_t> response_S;
 
 	AXI_BUS bus("bus");
-	AXI_MANAGER m("m");
-	AXI_SUBORDINATE s("s");
+	AXI_MANAGER m("M1");
+	AXI_SUBORDINATE s("S1");
 	RESETTER r("r");
 	
 	r.ARESETn(ARESETn);

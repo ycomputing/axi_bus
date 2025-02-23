@@ -128,6 +128,7 @@ void AXI_SUBORDINATE::write_memory_csv(const char *filename)
 
 void AXI_SUBORDINATE::log(std::string source, std::string action, std::string detail)
 {
-	std::string log_source = "SUBORDINATE:" + source;
+	std::string sep = ":";
+	std::string log_source = "SUBORDINATE" + sep + name() + sep + source;
 	AXI_BUS::log(log_source, action, detail);
 }

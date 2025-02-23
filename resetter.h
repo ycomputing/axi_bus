@@ -10,12 +10,6 @@ SC_MODULE(RESETTER)
 
 	void thread_execute()
 	{
-		ARESETn = true;
-		wait(13, SC_NS);
-		ARESETn = false;
-		wait(20, SC_NS);
-		ARESETn = true;
-		wait(40, SC_NS);
 		ARESETn = false;
 		wait(10, SC_NS);
 		ARESETn = true;
