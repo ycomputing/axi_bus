@@ -531,7 +531,8 @@ bool AXI_BUS::progress_create(axi_bus_info_t& info, bool is_write)
 	trans.length = info.len + 1;
 	trans.is_write = is_write;
 	map_progress[info.id] = std::make_tuple(trans, 0);
-	log_detail = "id=" + std::to_string(info.id) + ", " + transaction_to_string(trans);
+	log_detail = "outstanding=" + std::to_string(map_progress.size());
+	log_detail += ", id=" + std::to_string(info.id) + ", " + transaction_to_string(trans);
 	log(__FUNCTION__, "CREATE PROGRESS", log_detail);
 	progress_dump();
 	return true;
@@ -539,6 +540,8 @@ bool AXI_BUS::progress_create(axi_bus_info_t& info, bool is_write)
 
 void AXI_BUS::progress_delete(axi_bus_info_t& info)
 {
+	std::string log_detail;
+
 	auto iter = map_progress.find(info.id);
 	if (iter == map_progress.end())
 	{
@@ -549,10 +552,13 @@ void AXI_BUS::progress_delete(axi_bus_info_t& info)
 		return;
 	}
 
-	log(__FUNCTION__, "DELETE PROGRESS", bus_info_to_string(info));
+	map_progress.erase(iter);
+
+	log_detail = "outstanding=" + std::to_string(map_progress.size());
+	log_detail += ", id=" + std::to_string(info.id);
+	log(__FUNCTION__, "DELETE PROGRESS", log_detail);
 	progress_dump();
 
-	map_progress.erase(iter);
 }
 
 
@@ -677,9 +683,10 @@ void AXI_BUS::transaction_response_M()
 	{
 		axi_bus_info_t info = q_recv_B.front();
 		q_recv_B.pop();
-		mutex_q.unlock();
 		log_detail = transaction_send_info(response_M, info);
 		log(__FUNCTION__, "SENT RESPONSE", log_detail);
+		progress_delete(info);
+		mutex_q.unlock();
 	}
 
 	// read transaction

@@ -58,7 +58,7 @@ void AXI_SUBORDINATE::fifo_reader()
 	mutex_q.unlock();
 
 	log_detail = "scheduled=" + std::to_string(stamp_schedule_ns);
-	log_detail = ", latency=" + std::to_string(latency_ns);
+	log_detail += ", latency=" + std::to_string(latency_ns);
 	log_detail += ", " + AXI_BUS::transaction_to_string(trans);
 	log(__FUNCTION__, "SCHEDULE_RESPONSE", log_detail);
 }
