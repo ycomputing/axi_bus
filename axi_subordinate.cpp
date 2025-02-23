@@ -127,7 +127,7 @@ int AXI_SUBORDINATE::get_latency_ns(axi_trans_t trans)
 {
 	int latency_by_address = 0;
 	int latency_by_access_type = 0;
-	int latency_total = 0;
+	int latency_total_ns = 0;
 
 	if(trans.is_write)
 	{
@@ -147,8 +147,8 @@ int AXI_SUBORDINATE::get_latency_ns(axi_trans_t trans)
 		latency_by_address = 10000;
 	}
 
-	latency_total = latency_by_access_type + latency_by_address;
-	return latency_total;
+	latency_total_ns = latency_by_access_type + latency_by_address;
+	return latency_total_ns;
 }
 void AXI_SUBORDINATE::read_memory_csv()
 {
