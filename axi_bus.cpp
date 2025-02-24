@@ -6,6 +6,7 @@
 #include <string>
 #include <iomanip>
 #include <map>
+#include <mutex>
 
 using namespace sc_core;
 using namespace sc_dt;
