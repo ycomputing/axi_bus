@@ -19,7 +19,7 @@ using namespace sc_dt;
 
 // When you (don't) want to see channel signal activity
 // (comment out or) uncomment the following line.
-//#define DEBUG_AXI_BUS_CHANNEL
+#define DEBUG_AXI_BUS_CHANNEL
 
 // When you want to see progress dump
 //#define DEBUG_AXI_BUS_PROGRESS
@@ -244,28 +244,51 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 {
 	std::string log_action = CHANNEL_UNKNOWN;
 	std::string log_detail = "";
+	int size_q = 0;
 
 	mutex_q.lock();
+	size_q = q.size();
 	
 	if (is_ready(channel) == 0)
 	{
-		set_ready(channel, true);
-		log_action = CHANNEL_NOT_READY;
+		if (size_q >= Q_SIZE_RECV)
+		{
+			log_action = CHANNEL_NOT_READY;
+		}
+		else
+		{
+			set_ready(channel, true);
+			log_action = CHANNEL_READY;
+		}
 	}
 	else if (is_valid(channel))	// ready and valid
 	{
 		axi_bus_info_t info = recv_info(channel);
 		q.push(info);
-		event_something_to_send.notify(SC_ZERO_TIME);
-		log_action = CHANNEL_RECV;
+		size_q = q.size();
+		if (size_q >= Q_SIZE_RECV)
+		{
+			// Cannot receive more.
+			log_action = CHANNEL_RECV_FULL;
+			set_ready(channel, false);
+		}
+		else
+		{
+			log_action = CHANNEL_RECV;
+		}
 		log_detail = bus_info_to_string(info);
+		event_something_to_send.notify(SC_ZERO_TIME);
 	}
 	else	// ready but not valid
 	{
-		log_action = CHANNEL_WAITV;
+		log_action = CHANNEL_WAIT_V;
 	}
 
+	log_detail = "recvQ=" + std::to_string(size_q);
 	log(channel, log_action, log_detail);
+
+	// keep asking to send
+	event_something_to_send.notify(SC_ZERO_TIME);
 	mutex_q.unlock();
 }
 
@@ -283,7 +306,7 @@ void AXI_BUS::channel_sender(int channel, std::queue<axi_bus_info_t>& q)
 		{
 			// The receiver did not take current data yet.
 			// We have to wait until the receiver is ready
-			log_action = CHANNEL_WAITR;
+			log_action = CHANNEL_WAIT_R;
 		}
 		else
 		{
@@ -332,7 +355,7 @@ void AXI_BUS::channel_sender(int channel, std::queue<axi_bus_info_t>& q)
 		{
 			if (is_valid(channel))
 			{
-				log_action = CHANNEL_WAITR;
+				log_action = CHANNEL_WAIT_R;
 			}
 			else
 			{
