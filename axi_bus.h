@@ -18,7 +18,6 @@ typedef struct struct_axi_trans
 	uint8_t		length;
 	bus_data_t	data[AXI_TRANSACTION_LENGTH_MAX];
 	bool		is_write;
-
 } axi_trans_t;
 
 // The following function is required by 6.23.3 of IEEE std 1666-2011

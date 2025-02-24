@@ -144,7 +144,7 @@ int AXI_SUBORDINATE::get_latency_ns(axi_trans_t trans)
 	}
 	else
 	{
-		latency_by_address = 10000;
+		latency_by_address = 0;
 	}
 
 	latency_total_ns = latency_by_access_type + latency_by_address;
