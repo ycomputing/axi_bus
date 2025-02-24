@@ -9,7 +9,8 @@
 #include <vector>
 #include <string>
 #include <functional>
-
+#include <mutex>
+#include <unordered_map>
 #include "axi_param.h"
 
 typedef struct struct_axi_trans
