@@ -19,6 +19,7 @@ typedef struct struct_axi_trans
 	uint8_t		length;
 	bus_data_t	data[AXI_TRANSACTION_LENGTH_MAX];
 	bool		is_write;
+	uint8_t		progress;
 } axi_trans_t;
 
 // The following function is required by 6.23.3 of IEEE std 1666-2011
@@ -26,9 +27,6 @@ inline std::ostream& operator<<(std::ostream& os, const struct_axi_trans& trans)
 {
 	return os;
 }
-
-
-typedef std::tuple<axi_trans_t, uint8_t> tuple_progress_t;
 
 typedef struct
 {
@@ -97,8 +95,9 @@ SC_MODULE(AXI_BUS)
 	// To access many queues from many threads, we need to use mutex
 	std::mutex mutex_q;
 	sc_event_queue event_something_to_send;
+	sc_event event_outstanding_has_room;
 
-	std::unordered_map<uint32_t, tuple_progress_t> map_progress;
+	std::unordered_map<uint32_t, axi_trans_t> map_outstanding;
 
 	SC_CTOR(AXI_BUS)
 	{
@@ -136,7 +135,6 @@ SC_MODULE(AXI_BUS)
 
 	static std::string transaction_to_string(const axi_trans_t& trans);
 	static std::string bus_info_to_string(const axi_bus_info_t& info);
-	std::string progress_to_string(const tuple_progress_t& progress);
 
 	void transaction_request_M();
 	void transaction_response_S();
@@ -144,9 +142,10 @@ SC_MODULE(AXI_BUS)
 	void transaction_request_S();
 	std::string transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, axi_bus_info_t& info);
 
-	bool progress_create(axi_bus_info_t& info, bool is_write);
-	void progress_delete(axi_bus_info_t& info);
-	bool progress_update(std::queue<axi_bus_info_t>& q);
+	bool outstanding_create(axi_bus_info_t& info, bool is_write);
+	void outstanding_delete(axi_bus_info_t& info);
+	bool outstanding_update(std::queue<axi_bus_info_t>& q);
+	bool outstanding_is_present(uint32_t id);
 
 	void channel_sender(int channel, std::queue<axi_bus_info_t>& q);
 	void channel_receiver(int channel, std::queue<axi_bus_info_t>& q);
@@ -157,7 +156,7 @@ SC_MODULE(AXI_BUS)
 	uint32_t generate_transaction_id();
 	void wait_enough_delta_cycles();
 
-	void progress_dump();
+	void outstanding_dump();
 };
 
 #endif

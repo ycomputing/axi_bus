@@ -21,8 +21,8 @@ using namespace sc_dt;
 // (comment out or) uncomment the following line.
 #define DEBUG_AXI_BUS_CHANNEL
 
-// When you want to see progress dump
-//#define DEBUG_AXI_BUS_PROGRESS
+// When you want to see outstanding dump
+//#define DEBUG_AXI_BUS_OUTSTANDING
 
 void AXI_BUS::thread_clock()
 {
@@ -251,7 +251,7 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 	
 	if (is_ready(channel) == 0)
 	{
-		if (size_q >= Q_SIZE_RECV)
+		if (size_q >= AXI_BUS_Q_SIZE_RECV)
 		{
 			log_action = CHANNEL_NOT_READY;
 		}
@@ -266,7 +266,7 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 		axi_bus_info_t info = recv_info(channel);
 		q.push(info);
 		size_q = q.size();
-		if (size_q >= Q_SIZE_RECV)
+		if (size_q >= AXI_BUS_Q_SIZE_RECV)
 		{
 			// Cannot receive more.
 			log_action = CHANNEL_RECV_FULL;
@@ -444,11 +444,9 @@ void AXI_BUS::transaction_request_M()
 	info.addr = trans.addr;
 	info.len = trans.length - 1;
 
-
-	mutex_q.lock();
-
 	if (trans.is_write)
 	{
+		mutex_q.lock();
 		q_send_AW.push(info);
 
 		info.is_last = false;
@@ -461,14 +459,28 @@ void AXI_BUS::transaction_request_M()
 			info.data = trans.data[i];
 			q_send_W.push(info);
 		}
+		mutex_q.unlock();
 	}
 	else
 	{
-		progress_create(info, trans.is_write);
-		q_send_AR.push(info);
+		bool is_created = outstanding_create(info, trans.is_write);
+		while (is_created == false)
+		{
+			log(__FUNCTION__, "WAIT_OUTSTANDING", transaction_to_string(trans));
+			wait(event_outstanding_has_room);
+			is_created = outstanding_create(info, trans.is_write);
+		};
+
+		log(__FUNCTION__, "WAIT_OUTSTANDING_OVER", transaction_to_string(trans));
+		
+		if (is_created)
+		{
+			mutex_q.lock();
+			q_send_AR.push(info);
+			mutex_q.unlock();
+		}
 	}
 
-	mutex_q.unlock();
 }
 
 void AXI_BUS::transaction_response_S()
@@ -482,17 +494,15 @@ void AXI_BUS::transaction_response_S()
 	mutex_q.lock();
 
 	uint32_t id;
-	tuple_progress_t progress;
-	axi_trans_t trans_in_progress;
+	axi_trans_t trans_outstanding;
 	bool found = false;
 
-	for (auto iter: map_progress)
+	for (auto iter: map_outstanding)
 	{
 		id = iter.first;
-		progress = iter.second;
-		trans_in_progress = std::get<0>(progress);
+		trans_outstanding = iter.second;
 
-		if (trans_in_progress.addr != trans.addr)
+		if (trans_outstanding.addr != trans.addr)
 		{
 			continue;
 		}
@@ -503,9 +513,9 @@ void AXI_BUS::transaction_response_S()
 
 	if (found == false)
 	{
-		log(__FUNCTION__, "Response not in progress",transaction_to_string(trans));
-		progress_dump();
-		SC_REPORT_FATAL("Response, not in progress", transaction_to_string(trans).c_str());
+		log(__FUNCTION__, "Response not in outstanding",transaction_to_string(trans));
+		outstanding_dump();
+		SC_REPORT_FATAL("Response, not in outstanding", transaction_to_string(trans).c_str());
 
 		mutex_q.unlock();
 		return;
@@ -536,139 +546,6 @@ void AXI_BUS::transaction_response_S()
 	mutex_q.unlock();
 }
 
-bool AXI_BUS::progress_create(axi_bus_info_t& info, bool is_write)
-{
-	std::string log_detail;
-
-	axi_trans_t trans;
-	auto iter = map_progress.find(info.id);
-	if (iter != map_progress.end())
-	{
-		// Duplicate ID
-		log(__FUNCTION__, "DUPLICATE", bus_info_to_string(info));
-		progress_dump();
-		SC_REPORT_FATAL("DUPLICATE ID", bus_info_to_string(info).c_str());
-		return false;
-	}
-
-	trans.addr = info.addr;
-	trans.length = info.len + 1;
-	trans.is_write = is_write;
-	map_progress[info.id] = std::make_tuple(trans, 0);
-	log_detail = "outstanding=" + std::to_string(map_progress.size());
-	log_detail += ", id=" + std::to_string(info.id) + ", " + transaction_to_string(trans);
-	log(__FUNCTION__, "CREATE PROGRESS", log_detail);
-	progress_dump();
-	return true;
-}
-
-void AXI_BUS::progress_delete(axi_bus_info_t& info)
-{
-	std::string log_detail;
-
-	auto iter = map_progress.find(info.id);
-	if (iter == map_progress.end())
-	{
-		// No such ID
-		log(__FUNCTION__, "NO ID", bus_info_to_string(info));
-		progress_dump();
-		SC_REPORT_FATAL("NO ID", bus_info_to_string(info).c_str());
-		return;
-	}
-
-	map_progress.erase(iter);
-
-	log_detail = "outstanding=" + std::to_string(map_progress.size());
-	log_detail += ", id=" + std::to_string(info.id);
-	log(__FUNCTION__, "DELETE PROGRESS", log_detail);
-	progress_dump();
-
-}
-
-
-// returns true when 100% progress is made.
-// you have to pop the q manually when this returns true.
-
-bool AXI_BUS::progress_update(std::queue<axi_bus_info_t>& q)
-{
-	std::string log_detail;
-
-	axi_bus_info_t info;
-	
-	if (q.empty())
-	{
-		return false;
-	}
-
-	info = q.front();
-	auto iter = map_progress.find(info.id);
-	if (iter == map_progress.end())
-	{
-		// Nothing in progress for that id
-		log(__FUNCTION__, "NO ID", bus_info_to_string(info));
-		progress_dump();
-		SC_REPORT_FATAL("NOID", "q_recv_X");
-	}
-	auto& progress = iter->second;
-	auto& trans_in_progress = std::get<0>(progress);
-	int8_t count_done = std::get<1>(progress);
-
-	if (count_done < trans_in_progress.length)
-	{
-		// be careful to update original data
-		trans_in_progress.data[count_done] = info.data;
-		count_done ++;
-		std::get<1>(progress) = count_done;
-	}
-	else if (info.is_last)
-	{
-		// full already, waiting for transaction processing.
-		log_detail = "done=" + std::to_string(count_done) + "/"
-			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "FULL WAIT", log_detail);
-
-		return true;
-	}
-	else
-	{		// We got more data than required length
-		log(__FUNCTION__, "TOO MUCH DATA", bus_info_to_string(info));
-		progress_dump();
-		SC_REPORT_FATAL("TOO MUCH DATA", "q_recv_X");
-	}
-
-
-	// count_done is increased.
-
-	if (info.is_last)
-	{
-		if (count_done != trans_in_progress.length)
-		{
-			// We got last data when there must be more
-			log_detail = "done=" + std::to_string(count_done) + "/"
-			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
-			log(__FUNCTION__, "PREMATURE LAST", log_detail);
-			progress_dump();
-			SC_REPORT_FATAL("PREMATURE LAST", "q_recv_X");
-		}
-		// progress is 100%.
-		// do not pop, do not erase progress yet.
-		log_detail = "done=" + std::to_string(count_done) + "/"
-			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "LAST ONE", log_detail);
-		return true;
-
-	}
-	else	// not the last data
-	{
-		q.pop();
-		log_detail = "done=" + std::to_string(count_done) + "/"
-			+ std::to_string(trans_in_progress.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "PLUS ONE", log_detail);
-	}
-
-	return false;
-}
-
 std::string AXI_BUS::transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, axi_bus_info_t& info)
 {
 	std::string log_detail;
@@ -676,20 +553,19 @@ std::string AXI_BUS::transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, a
 	// This function does not lock the queue.
 	// You must lock the queue before calling this function if needed.
 
-	auto iter = map_progress.find(info.id);
-	if (iter == map_progress.end())
+	auto iter = map_outstanding.find(info.id);
+	if (iter == map_outstanding.end())
 	{
-		// Nothing in progress for that id
+		// Nothing in outstanding for that id
 		log_detail += ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "NO ID in progress", log_detail);
-		progress_dump();
+		log(__FUNCTION__, "NO ID in outstanding", log_detail);
+		outstanding_dump();
 		SC_REPORT_FATAL("NOID", "q_recv_X");
 	}
 
-	auto& progress = iter->second;
-	auto& trans_in_progress = std::get<0>(progress);
-	fifo_out.write(trans_in_progress);
-	log_detail = transaction_to_string(trans_in_progress);
+	auto& trans_outstanding = iter->second;
+	fifo_out.write(trans_outstanding);
+	log_detail = transaction_to_string(trans_outstanding);
 	return log_detail;
 }
 
@@ -709,13 +585,13 @@ void AXI_BUS::transaction_response_M()
 		q_recv_B.pop();
 		log_detail = transaction_send_info(response_M, info);
 		log(__FUNCTION__, "SENT RESPONSE", log_detail);
-		progress_delete(info);
+		outstanding_delete(info);
 		mutex_q.unlock();
 	}
 
 	// read transaction
 	mutex_q.lock();
-	bool is_completed = progress_update(q_recv_R);
+	bool is_completed = outstanding_update(q_recv_R);
 	if (!is_completed)
 	{
 		mutex_q.unlock();
@@ -729,7 +605,7 @@ void AXI_BUS::transaction_response_M()
 		log_detail = transaction_send_info(response_M, info);
 		log(__FUNCTION__, "SENT RESPONSE", log_detail);
 		mutex_q.lock();
-		progress_delete(info);
+		outstanding_delete(info);
 		mutex_q.unlock();
 	}
 
@@ -742,26 +618,37 @@ void AXI_BUS::transaction_request_S()
 
 	if (!q_recv_AW.empty())
 	{
-		progress_create(q_recv_AW.front(), true);
-		q_recv_AW.pop();
+		bool is_created = outstanding_create(q_recv_AW.front(), true);
+		if (is_created)
+		{
+			q_recv_AW.pop();
+		}
 	}
 
 	mutex_q.unlock();
 	mutex_q.lock();
 
-	bool is_completed = progress_update(q_recv_W);
-	if (is_completed)
+	if (!q_recv_W.empty())
 	{
 		axi_bus_info_t info = q_recv_W.front();
-		q_recv_W.pop();
-		mutex_q.unlock();
-		transaction_send_info(request_S, info);
-	}
-	else
-	{
-		mutex_q.unlock();
+		if (outstanding_is_present(info.id))
+		{
+			bool is_completed = outstanding_update(q_recv_W);
+			if (is_completed)
+			{
+				axi_bus_info_t info = q_recv_W.front();
+				q_recv_W.pop();
+				transaction_send_info(request_S, info);
+			}
+		}
+		else
+		{
+			// outstanding is not present. Not error but warning
+			log(__FUNCTION__, "NO ID in outstanding", bus_info_to_string(info));
+		}
 	}
 
+	mutex_q.unlock();
 	mutex_q.lock();
 
 	if (!q_recv_AR.empty())
@@ -773,6 +660,154 @@ void AXI_BUS::transaction_request_S()
 	}
 
 	mutex_q.unlock();
+}
+
+bool AXI_BUS::outstanding_create(axi_bus_info_t& info, bool is_write)
+{
+	std::string log_detail;
+
+	axi_trans_t trans;
+	if (outstanding_is_present(info.id))
+	{
+		// Duplicate ID
+		log(__FUNCTION__, "DUPLICATE", bus_info_to_string(info));
+		outstanding_dump();
+		SC_REPORT_FATAL("DUPLICATE ID", bus_info_to_string(info).c_str());
+		return false;
+	}
+
+	if (map_outstanding.size() >= AXI_BUS_OUTSTANDING_MAX)
+	{
+		// Too many outstanding now
+		log(__FUNCTION__, "TOO MANY", bus_info_to_string(info));
+		return false;
+	}
+
+	trans.addr = info.addr;
+	trans.length = info.len + 1;
+	trans.progress = 0;
+	trans.is_write = is_write;
+	map_outstanding[info.id] = trans;
+	log_detail = "concurrent=" + std::to_string(map_outstanding.size());
+	log_detail += ", id=" + std::to_string(info.id) + ", " + transaction_to_string(trans);
+	log(__FUNCTION__, "CREATE OUTSTANDING", log_detail);
+	outstanding_dump();
+	return true;
+}
+
+void AXI_BUS::outstanding_delete(axi_bus_info_t& info)
+{
+	std::string log_detail;
+
+	auto iter = map_outstanding.find(info.id);
+	if (iter == map_outstanding.end())
+	{
+		// No such ID
+		log(__FUNCTION__, "NO ID", bus_info_to_string(info));
+		outstanding_dump();
+		SC_REPORT_FATAL("NO ID", bus_info_to_string(info).c_str());
+		return;
+	}
+
+	map_outstanding.erase(iter);
+
+	log_detail = "size=" + std::to_string(map_outstanding.size());
+	log_detail += ", id=" + std::to_string(info.id);
+	log(__FUNCTION__, "DELETE OUTSTANDING", log_detail);
+	outstanding_dump();
+
+	event_outstanding_has_room.notify(SC_ZERO_TIME);
+}
+
+
+// returns true when 100% progress is made.
+// you have to pop the q manually when this returns true.
+
+bool AXI_BUS::outstanding_update(std::queue<axi_bus_info_t>& q)
+{
+	std::string log_detail;
+
+	axi_bus_info_t info;
+	
+	if (q.empty())
+	{
+		return false;
+	}
+
+	info = q.front();
+	auto iter = map_outstanding.find(info.id);
+	if (iter == map_outstanding.end())
+	{
+		// Nothing in outstanding for that id
+		log(__FUNCTION__, "NO ID", bus_info_to_string(info));
+		outstanding_dump();
+		SC_REPORT_FATAL("NOID", "q_recv_X");
+	}
+	axi_trans_t& trans = iter->second;
+
+	if (trans.progress < trans.length)
+	{
+		// be careful to update original data
+		trans.data[trans.progress] = info.data;
+		trans.progress ++;
+	}
+	else if (info.is_last)
+	{
+		// full already, waiting for transaction processing.
+		log_detail = "progress=" + std::to_string(trans.progress) + "/"
+			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
+		log(__FUNCTION__, "FULL WAIT", log_detail);
+
+		return true;
+	}
+	else
+	{		// We got more data than required length
+		log(__FUNCTION__, "TOO MUCH DATA", bus_info_to_string(info));
+		outstanding_dump();
+		SC_REPORT_FATAL("TOO MUCH DATA", "q_recv_X");
+	}
+
+
+	// count_done is increased.
+
+	if (info.is_last)
+	{
+		if (trans.progress != trans.length)
+		{
+			// We got last data when there must be more
+			log_detail = "progress=" + std::to_string(trans.progress) + "/"
+			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
+			log(__FUNCTION__, "PREMATURE LAST", log_detail);
+			outstanding_dump();
+			SC_REPORT_FATAL("PREMATURE LAST", "q_recv_X");
+		}
+		// progress is 100%.
+		// do not pop, do not erase outstanding yet.
+		log_detail = "progress=" + std::to_string(trans.progress) + "/"
+			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
+		log(__FUNCTION__, "LAST ONE", log_detail);
+		return true;
+
+	}
+	else	// not the last data
+	{
+		q.pop();
+		log_detail = "progress=" + std::to_string(trans.progress) + "/"
+			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
+		log(__FUNCTION__, "PLUS ONE", log_detail);
+	}
+
+	return false;
+}
+
+bool AXI_BUS::outstanding_is_present(uint32_t id)
+{
+	auto iter = map_outstanding.find(id);
+	if (iter == map_outstanding.end())
+	{
+		return false;
+	}
+	return true;
 }
 
 uint32_t AXI_BUS::generate_transaction_id()
@@ -810,7 +845,8 @@ std::string AXI_BUS::transaction_to_string(const axi_trans_t& trans)
 	std::string s;
 	bool is_first = true;
 	s = "addr=" + address_to_hex_string(trans.addr)
-		+ ", length=" + std::to_string(trans.length)
+		+ ", progress=" + std::to_string(trans.progress)
+		+ "/" + std::to_string(trans.length)
 		+ ", wr=" + std::to_string(trans.is_write)
 		+ ", data=";
 	for (int i = 0; i < trans.length; i++)
@@ -828,35 +864,24 @@ std::string AXI_BUS::transaction_to_string(const axi_trans_t& trans)
 	return s;
 }
 
-std::string AXI_BUS::progress_to_string(const tuple_progress_t& progress)
-{
-	axi_trans_t trans;
-	uint8_t count;
-	trans = std::get<0>(progress);
-	count = std::get<1>(progress);
-	std::string s;
-	s = transaction_to_string(trans) + ", progress=" + std::to_string(count);
-	return s;
-}
-
-void AXI_BUS::progress_dump()
+void AXI_BUS::outstanding_dump()
 {
 
 #ifdef DEBUG_AXI_BUS_PROGRESS
 	//typedef std::tuple<axi_trans_t, int8_t>
-	tuple_progress_t progress;
 	uint32_t id;
 	std::string out;
+	axi_trans_t trans;
 
-	out = "----------------------------------------------- progress dump begin\n";
-	for (auto iter: map_progress)
+	out = "----------------------------------------------- outstanding dump begin\n";
+	for (auto iter: map_outstanding)
 	{
 		id = iter.first;
-		progress = iter.second;
-		out += ">>>>id=" + std::to_string(id) + ", " + progress_to_string(progress);
+		trans = iter.second;
+		out += ">>>>id=" + std::to_string(id) + ", " + transaction_to_string(trans);
 		out += "\n";
 	}
-	out += "----------------------------------------------- progress dump end\n";
+	out += "----------------------------------------------- outstanding dump end\n";
 
 	std::cout << out;
 #endif

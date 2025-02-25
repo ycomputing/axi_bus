@@ -187,6 +187,7 @@ void AXI_MANAGER::read_access_csv()
 			trans_current.length = length;
 			trans_current.data[0] = data;
 			trans_current.is_write = is_write;
+			trans_current.progress = 0;
 			count_data = 1;
 			stamp_current = stamp;
 			is_expecting_new = false;

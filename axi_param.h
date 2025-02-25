@@ -16,16 +16,20 @@ typedef sc_dt::sc_bigint<DATA_WIDTH> bus_data_t;
 // AxLEN width is 8 bits, so biggest possible is 256
 #define AXI_TRANSACTION_LENGTH_MAX	256
 
+// channel queue size
+#define AXI_BUS_Q_SIZE_RECV	2
+#define AXI_BUS_Q_SIZE_SEND 2
+
+// maximum number of entries in the progress
+// how many outstanding transactions can be
+#define AXI_BUS_OUTSTANDING_MAX	2
+
 // channel id
 #define CHANNEL_AW		1
 #define CHANNEL_W		2
 #define CHANNEL_B		3
 #define CHANNEL_AR		4
 #define CHANNEL_R		5
-
-// channel queue size
-#define Q_SIZE_RECV	1
-#define Q_SIZE_SEND 2
 
 // name of channel states
 
