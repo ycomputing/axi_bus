@@ -95,7 +95,7 @@ SC_MODULE(AXI_BUS)
 	// To access many queues from many threads, we need to use mutex
 	std::mutex mutex_q;
 	sc_event_queue event_something_to_send;
-	sc_event event_outstanding_has_room;
+	sc_event_queue event_outstanding_has_room;
 
 	std::unordered_map<uint32_t, axi_trans_t> map_outstanding;
 

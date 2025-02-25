@@ -466,12 +466,12 @@ void AXI_BUS::transaction_request_M()
 		bool is_created = outstanding_create(info, trans.is_write);
 		while (is_created == false)
 		{
-			log(__FUNCTION__, "WAIT_OUTSTANDING", transaction_to_string(trans));
-			wait(event_outstanding_has_room);
+			log(__FUNCTION__, "AR_WAIT_OUTSTANDING", transaction_to_string(trans));
+			wait(event_outstanding_has_room.default_event());
 			is_created = outstanding_create(info, trans.is_write);
-		};
+		}
 
-		log(__FUNCTION__, "WAIT_OUTSTANDING_OVER", transaction_to_string(trans));
+		log(__FUNCTION__, "AR_CREATED_OUTSTANDING", transaction_to_string(trans));
 		
 		if (is_created)
 		{
@@ -546,29 +546,6 @@ void AXI_BUS::transaction_response_S()
 	mutex_q.unlock();
 }
 
-std::string AXI_BUS::transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, axi_bus_info_t& info)
-{
-	std::string log_detail;
-
-	// This function does not lock the queue.
-	// You must lock the queue before calling this function if needed.
-
-	auto iter = map_outstanding.find(info.id);
-	if (iter == map_outstanding.end())
-	{
-		// Nothing in outstanding for that id
-		log_detail += ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "NO ID in outstanding", log_detail);
-		outstanding_dump();
-		SC_REPORT_FATAL("NOID", "q_recv_X");
-	}
-
-	auto& trans_outstanding = iter->second;
-	fifo_out.write(trans_outstanding);
-	log_detail = transaction_to_string(trans_outstanding);
-	return log_detail;
-}
-
 void AXI_BUS::transaction_response_M()
 {
 	std::string log_detail;
@@ -608,21 +585,26 @@ void AXI_BUS::transaction_response_M()
 		outstanding_delete(info);
 		mutex_q.unlock();
 	}
-
 }
 
 void AXI_BUS::transaction_request_S()
 {
-
 	mutex_q.lock();
 
 	if (!q_recv_AW.empty())
 	{
+		log(__FUNCTION__, "AW_TRY_CREATE_OUTSTANDING", bus_info_to_string(q_recv_AW.front()));
 		bool is_created = outstanding_create(q_recv_AW.front(), true);
-		if (is_created)
+		while (is_created == false)
 		{
-			q_recv_AW.pop();
-		}
+			log(__FUNCTION__, "AW_WAIT_OUTSTANDING", bus_info_to_string(q_recv_AW.front()));
+			mutex_q.unlock();
+			wait(event_outstanding_has_room.default_event());
+			mutex_q.lock();
+			is_created = outstanding_create(q_recv_AW.front(), true);
+		};
+		log(__FUNCTION__, "AW_CREATED_OUTSTANDING", bus_info_to_string(q_recv_AW.front()));
+		q_recv_AW.pop();
 	}
 
 	mutex_q.unlock();
@@ -644,7 +626,7 @@ void AXI_BUS::transaction_request_S()
 		else
 		{
 			// outstanding is not present. Not error but warning
-			log(__FUNCTION__, "NO ID in outstanding", bus_info_to_string(info));
+			log(__FUNCTION__, "W is waiting AW", bus_info_to_string(info));
 		}
 	}
 
@@ -660,6 +642,29 @@ void AXI_BUS::transaction_request_S()
 	}
 
 	mutex_q.unlock();
+}
+
+std::string AXI_BUS::transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, axi_bus_info_t& info)
+{
+	std::string log_detail;
+
+	// This function does not lock the queue.
+	// You must lock the queue before calling this function if needed.
+
+	auto iter = map_outstanding.find(info.id);
+	if (iter == map_outstanding.end())
+	{
+		// Nothing in outstanding for that id
+		log_detail += ", " + bus_info_to_string(info);
+		log(__FUNCTION__, "NO ID in outstanding", log_detail);
+		outstanding_dump();
+		SC_REPORT_FATAL("NOID", "q_recv_X");
+	}
+
+	auto& trans_outstanding = iter->second;
+	fifo_out.write(trans_outstanding);
+	log_detail = transaction_to_string(trans_outstanding);
+	return log_detail;
 }
 
 bool AXI_BUS::outstanding_create(axi_bus_info_t& info, bool is_write)
