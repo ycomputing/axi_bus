@@ -21,9 +21,6 @@ using namespace sc_dt;
 // (comment out or) uncomment the following line.
 #define DEBUG_AXI_BUS_CHANNEL
 
-// When you want to see outstanding dump
-//#define DEBUG_AXI_BUS_OUTSTANDING
-
 void AXI_BUS::thread_clock()
 {
 	while(true)
@@ -108,6 +105,21 @@ void AXI_BUS::on_reset()
 	RID.write(0);
 	RDATA.write(0);
 	RLAST.write(0);
+}
+
+bool AXI_BUS::is_address(int channel)
+{
+	switch (channel)
+	{
+		case CHANNEL_AW:	return(true);
+		case CHANNEL_AR:	return(true);
+		case CHANNEL_W:		return(false);
+		case CHANNEL_B:		return(false);
+		case CHANNEL_R:		return(false);
+		default:
+			SC_REPORT_FATAL("Unknown channel", std::to_string(channel).c_str());
+			return false;
+	}
 }
 
 bool AXI_BUS::is_ready(int channel)
@@ -255,6 +267,11 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 		{
 			log_action = CHANNEL_NOT_READY;
 		}
+		else if (is_recv_full(channel))
+		{
+			log_action = CHANNEL_NOT_READY;
+			set_ready(channel, false);
+		}
 		else
 		{
 			set_ready(channel, true);
@@ -272,16 +289,30 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 			log_action = CHANNEL_RECV_FULL;
 			set_ready(channel, false);
 		}
+		else if (is_recv_full(channel))
+		{
+			// Cannot receive more.
+			log_action = CHANNEL_RECV_FULL;
+			set_ready(channel, false);
+		}
 		else
 		{
-			log_action = CHANNEL_RECV;
+			log_action = CHANNEL_RECV_CONTINUE;
 		}
 		log_detail = bus_info_to_string(info);
 		event_something_to_send.notify(SC_ZERO_TIME);
 	}
 	else	// ready but not valid
 	{
-		log_action = CHANNEL_WAIT_V;
+		if (is_recv_full(channel))
+		{
+			set_ready(channel, false);
+			log_action = CHANNEL_NOT_READY;
+		}
+		else
+		{
+			log_action = CHANNEL_WAIT_V;
+		}
 	}
 
 	log_detail = "recvQ=" + std::to_string(size_q);
@@ -407,25 +438,19 @@ std::string AXI_BUS::get_channel_name(int channel)
 
 void AXI_BUS::channel_transaction()
 {
-	wait_enough_delta_cycles();
-
 	channel_receiver(CHANNEL_AW, q_recv_AW);
 	channel_receiver(CHANNEL_W, q_recv_W);
 	channel_receiver(CHANNEL_AR, q_recv_AR);
-
-	wait_enough_delta_cycles();
 
 	channel_sender(CHANNEL_AW, q_send_AW);
 	channel_sender(CHANNEL_W, q_send_W);
 	channel_sender(CHANNEL_AR, q_send_AR);
 
-	wait_enough_delta_cycles();
+	//wait_enough_delta_cycles();
 
 	channel_receiver(CHANNEL_B, q_recv_B);
 	channel_receiver(CHANNEL_R, q_recv_R);
 
-	wait_enough_delta_cycles();
-	
 	channel_sender(CHANNEL_B, q_send_B);
 	channel_sender(CHANNEL_R, q_send_R);
 }
@@ -463,12 +488,12 @@ void AXI_BUS::transaction_request_M()
 	}
 	else
 	{
-		bool is_created = outstanding_create(info, trans.is_write);
+		bool is_created = outstanding_R.create(info);
 		while (is_created == false)
 		{
 			log(__FUNCTION__, "AR_WAIT_OUTSTANDING", transaction_to_string(trans));
-			wait(event_outstanding_has_room.default_event());
-			is_created = outstanding_create(info, trans.is_write);
+			wait(event_outstanding_R_has_room.default_event());
+			is_created = outstanding_R.create(info);
 		}
 
 		log(__FUNCTION__, "AR_CREATED_OUTSTANDING", transaction_to_string(trans));
@@ -486,6 +511,7 @@ void AXI_BUS::transaction_request_M()
 void AXI_BUS::transaction_response_S()
 {
 	axi_trans_t trans;
+	axi_bus_info_t info;
 
 	// blocking read
 	trans = response_S.read();
@@ -496,50 +522,41 @@ void AXI_BUS::transaction_response_S()
 	uint32_t id;
 	axi_trans_t trans_outstanding;
 	bool found = false;
+	std::unordered_map<uint32_t, axi_trans_t>::iterator iter;
 
-	for (auto iter: map_outstanding)
-	{
-		id = iter.first;
-		trans_outstanding = iter.second;
-
-		if (trans_outstanding.addr != trans.addr)
-		{
-			continue;
-		}
-
-		found = true;
-		break;
-	}
-
-	if (found == false)
-	{
-		log(__FUNCTION__, "Response not in outstanding",transaction_to_string(trans));
-		outstanding_dump();
-		SC_REPORT_FATAL("Response, not in outstanding", transaction_to_string(trans).c_str());
-
-		mutex_q.unlock();
-		return;
-	}
-
-	axi_bus_info_t info = create_null_info();
-	info.id = id;
-	info.addr = trans.addr;
-	info.len = trans.length - 1;
 	if (trans.is_write)
 	{
-		q_send_B.push(info);
+		iter = outstanding_W.find_by_addr(trans.addr);
+		if (iter != outstanding_R.map.end())
+		{
+			info = create_null_info();
+			info.id = id;
+			info.addr = trans.addr;
+			info.len = trans.length - 1;
+			q_send_B.push(info);
+			outstanding_R.dump();
+		}
 	}
 	else
 	{
-		info.is_last = false;
-		for (int i = 0; i < trans.length; i++)
+		// read
+		iter = outstanding_W.find_by_addr(trans.addr);
+		if (iter != outstanding_R.map.end())
 		{
-			if (i == info.len)
+			info = create_null_info();
+			info.id = id;
+			info.addr = trans.addr;
+			info.len = trans.length - 1;
+			info.is_last = false;
+			for (int i = 0; i < trans.length; i++)
 			{
-				info.is_last = true;
+				if (i == info.len)
+				{
+					info.is_last = true;
+				}
+				info.data = trans.data[i];
+				q_send_R.push(info);
 			}
-			info.data = trans.data[i];
-			q_send_R.push(info);
 		}
 	}
 
@@ -549,8 +566,8 @@ void AXI_BUS::transaction_response_S()
 void AXI_BUS::transaction_response_M()
 {
 	std::string log_detail;
+	axi_bus_info_t info;
 	mutex_q.lock();
-
 	// write transaction
 	if (q_recv_B.empty())
 	{
@@ -558,31 +575,31 @@ void AXI_BUS::transaction_response_M()
 	}
 	else
 	{
-		axi_bus_info_t info = q_recv_B.front();
+		info = q_recv_B.front();
 		q_recv_B.pop();
 		log_detail = transaction_send_info(response_M, info);
 		log(__FUNCTION__, "SENT RESPONSE", log_detail);
-		outstanding_delete(info);
+		outstanding_W.remove(info.id);
 		mutex_q.unlock();
 	}
 
 	// read transaction
 	mutex_q.lock();
-	bool is_completed = outstanding_update(q_recv_R);
-	if (!is_completed)
+	if (q_recv_R.empty())
 	{
 		mutex_q.unlock();
 	}
 	else
 	{
-		axi_bus_info_t info = q_recv_R.front();
+		info = q_recv_R.front();
+		bool is_completed = outstanding_R.update(info);
+		if (is_completed)
+		{
+			log_detail = transaction_send_info(response_M, info);
+			log(__FUNCTION__, "SENT RESPONSE", log_detail);
+			outstanding_R.remove(info.id);
+		}
 		q_recv_R.pop();
-		mutex_q.unlock();
-	
-		log_detail = transaction_send_info(response_M, info);
-		log(__FUNCTION__, "SENT RESPONSE", log_detail);
-		mutex_q.lock();
-		outstanding_delete(info);
 		mutex_q.unlock();
 	}
 }
@@ -594,14 +611,14 @@ void AXI_BUS::transaction_request_S()
 	if (!q_recv_AW.empty())
 	{
 		log(__FUNCTION__, "AW_TRY_CREATE_OUTSTANDING", bus_info_to_string(q_recv_AW.front()));
-		bool is_created = outstanding_create(q_recv_AW.front(), true);
+		bool is_created = outstanding_W.create(q_recv_AW.front());
 		while (is_created == false)
 		{
 			log(__FUNCTION__, "AW_WAIT_OUTSTANDING", bus_info_to_string(q_recv_AW.front()));
 			mutex_q.unlock();
-			wait(event_outstanding_has_room.default_event());
+			wait(event_outstanding_W_has_room.default_event());
 			mutex_q.lock();
-			is_created = outstanding_create(q_recv_AW.front(), true);
+			is_created = outstanding_W.create(q_recv_AW.front());
 		};
 		log(__FUNCTION__, "AW_CREATED_OUTSTANDING", bus_info_to_string(q_recv_AW.front()));
 		q_recv_AW.pop();
@@ -613,9 +630,9 @@ void AXI_BUS::transaction_request_S()
 	if (!q_recv_W.empty())
 	{
 		axi_bus_info_t info = q_recv_W.front();
-		if (outstanding_is_present(info.id))
+		if (outstanding_W.is_id_present(info.id))
 		{
-			bool is_completed = outstanding_update(q_recv_W);
+			bool is_completed = outstanding_W.update(q_recv_W.front());
 			if (is_completed)
 			{
 				axi_bus_info_t info = q_recv_W.front();
@@ -647,172 +664,69 @@ void AXI_BUS::transaction_request_S()
 std::string AXI_BUS::transaction_send_info(sc_fifo_out<axi_trans_t>& fifo_out, axi_bus_info_t& info)
 {
 	std::string log_detail;
+	axi_trans_t trans;
 
 	// This function does not lock the queue.
 	// You must lock the queue before calling this function if needed.
 
-	auto iter = map_outstanding.find(info.id);
-	if (iter == map_outstanding.end())
+	std::unordered_map<uint32_t, axi_trans_t>::iterator iter;
+	iter = outstanding_R.find_by_id (info.id);
+	if (iter != outstanding_R.map.end())
 	{
-		// Nothing in outstanding for that id
-		log_detail += ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "NO ID in outstanding", log_detail);
-		outstanding_dump();
-		SC_REPORT_FATAL("NOID", "q_recv_X");
+		trans = iter->second;
+		fifo_out.write(trans);
+		log_detail = transaction_to_string(trans);
+		return log_detail;
 	}
 
-	auto& trans_outstanding = iter->second;
-	fifo_out.write(trans_outstanding);
-	log_detail = transaction_to_string(trans_outstanding);
+	iter = outstanding_W.find_by_id (info.id);
+	if (iter != outstanding_W.map.end())
+	{
+		trans = iter->second;
+		fifo_out.write(trans);
+		log_detail = transaction_to_string(trans);
+		return log_detail;
+	}
+
+	// Nothing in outstanding for that id
+	log_detail += ", " + bus_info_to_string(info);
+	log(__FUNCTION__, "NO ID in outstanding", log_detail);
+	outstanding_R.dump();
+	outstanding_W.dump();
+	SC_REPORT_FATAL("NOID", "q_recv_X");
 	return log_detail;
 }
 
-bool AXI_BUS::outstanding_create(axi_bus_info_t& info, bool is_write)
+bool AXI_BUS::is_recv_full(int channel)
 {
-	std::string log_detail;
-
-	axi_trans_t trans;
-	if (outstanding_is_present(info.id))
+	bool is_full = false;
+	int size = 0;
+	int vacancy = 0;
+	switch (channel)
 	{
-		// Duplicate ID
-		log(__FUNCTION__, "DUPLICATE", bus_info_to_string(info));
-		outstanding_dump();
-		SC_REPORT_FATAL("DUPLICATE ID", bus_info_to_string(info).c_str());
-		return false;
+		case CHANNEL_AW:	vacancy = outstanding_W.size_vacant();
+							size = q_recv_AW.size();
+							if (vacancy <= size)
+							{
+								is_full = true;
+							}
+							break;
+		case CHANNEL_AR:	vacancy = outstanding_R.size_vacant();
+							size = q_recv_AR.size();
+							if (vacancy <= size)
+							{
+								is_full = true;
+							}
+							break;
+		case CHANNEL_W:
+		case CHANNEL_B:
+		case CHANNEL_R:		is_full = false;
+							break;
+		default:
+			SC_REPORT_FATAL("Unknown channel", std::to_string(channel).c_str());
+			return false;
 	}
-
-	if (map_outstanding.size() >= AXI_BUS_OUTSTANDING_MAX)
-	{
-		// Too many outstanding now
-		log(__FUNCTION__, "TOO MANY", bus_info_to_string(info));
-		return false;
-	}
-
-	trans.addr = info.addr;
-	trans.length = info.len + 1;
-	trans.progress = 0;
-	trans.is_write = is_write;
-	map_outstanding[info.id] = trans;
-	log_detail = "concurrent=" + std::to_string(map_outstanding.size());
-	log_detail += ", id=" + std::to_string(info.id) + ", " + transaction_to_string(trans);
-	log(__FUNCTION__, "CREATE OUTSTANDING", log_detail);
-	outstanding_dump();
-	return true;
-}
-
-void AXI_BUS::outstanding_delete(axi_bus_info_t& info)
-{
-	std::string log_detail;
-
-	auto iter = map_outstanding.find(info.id);
-	if (iter == map_outstanding.end())
-	{
-		// No such ID
-		log(__FUNCTION__, "NO ID", bus_info_to_string(info));
-		outstanding_dump();
-		SC_REPORT_FATAL("NO ID", bus_info_to_string(info).c_str());
-		return;
-	}
-
-	map_outstanding.erase(iter);
-
-	log_detail = "size=" + std::to_string(map_outstanding.size());
-	log_detail += ", id=" + std::to_string(info.id);
-	log(__FUNCTION__, "DELETE OUTSTANDING", log_detail);
-	outstanding_dump();
-
-	event_outstanding_has_room.notify(SC_ZERO_TIME);
-}
-
-
-// returns true when 100% progress is made.
-// you have to pop the q manually when this returns true.
-
-bool AXI_BUS::outstanding_update(std::queue<axi_bus_info_t>& q)
-{
-	std::string log_detail;
-
-	axi_bus_info_t info;
-	
-	if (q.empty())
-	{
-		return false;
-	}
-
-	info = q.front();
-	auto iter = map_outstanding.find(info.id);
-	if (iter == map_outstanding.end())
-	{
-		// Nothing in outstanding for that id
-		log(__FUNCTION__, "NO ID", bus_info_to_string(info));
-		outstanding_dump();
-		SC_REPORT_FATAL("NOID", "q_recv_X");
-	}
-	axi_trans_t& trans = iter->second;
-
-	if (trans.progress < trans.length)
-	{
-		// be careful to update original data
-		trans.data[trans.progress] = info.data;
-		trans.progress ++;
-	}
-	else if (info.is_last)
-	{
-		// full already, waiting for transaction processing.
-		log_detail = "progress=" + std::to_string(trans.progress) + "/"
-			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "FULL WAIT", log_detail);
-
-		return true;
-	}
-	else
-	{		// We got more data than required length
-		log(__FUNCTION__, "TOO MUCH DATA", bus_info_to_string(info));
-		outstanding_dump();
-		SC_REPORT_FATAL("TOO MUCH DATA", "q_recv_X");
-	}
-
-
-	// count_done is increased.
-
-	if (info.is_last)
-	{
-		if (trans.progress != trans.length)
-		{
-			// We got last data when there must be more
-			log_detail = "progress=" + std::to_string(trans.progress) + "/"
-			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
-			log(__FUNCTION__, "PREMATURE LAST", log_detail);
-			outstanding_dump();
-			SC_REPORT_FATAL("PREMATURE LAST", "q_recv_X");
-		}
-		// progress is 100%.
-		// do not pop, do not erase outstanding yet.
-		log_detail = "progress=" + std::to_string(trans.progress) + "/"
-			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "LAST ONE", log_detail);
-		return true;
-
-	}
-	else	// not the last data
-	{
-		q.pop();
-		log_detail = "progress=" + std::to_string(trans.progress) + "/"
-			+ std::to_string(trans.length) + ", " + bus_info_to_string(info);
-		log(__FUNCTION__, "PLUS ONE", log_detail);
-	}
-
-	return false;
-}
-
-bool AXI_BUS::outstanding_is_present(uint32_t id)
-{
-	auto iter = map_outstanding.find(id);
-	if (iter == map_outstanding.end())
-	{
-		return false;
-	}
-	return true;
+	return is_full;
 }
 
 uint32_t AXI_BUS::generate_transaction_id()
@@ -833,63 +747,4 @@ void AXI_BUS::wait_enough_delta_cycles()
 	{
 		wait(SC_ZERO_TIME);
 	}
-}
-
-std::string AXI_BUS::bus_info_to_string(const axi_bus_info_t& info)
-{
-	std::string s;
-	s = "id=" + std::to_string(info.id)
-		+ ", addr=" + address_to_hex_string(info.addr)
-		+ ", len=" + std::to_string(info.len)
-		+ ", data=" + bus_data_to_hex_string(info.data);
-	return s;
-}
-
-std::string AXI_BUS::transaction_to_string(const axi_trans_t& trans)
-{
-	std::string s;
-	bool is_first = true;
-	s = "addr=" + address_to_hex_string(trans.addr)
-		+ ", progress=" + std::to_string(trans.progress)
-		+ "/" + std::to_string(trans.length)
-		+ ", wr=" + std::to_string(trans.is_write)
-		+ ", data=";
-	for (int i = 0; i < trans.length; i++)
-	{
-		if (is_first == false)
-		{
-			s += ",";
-		}
-		s += bus_data_to_hex_string(trans.data[i]);
-		if (is_first)
-		{
-			is_first = false;
-		}
-	}
-	return s;
-}
-
-void AXI_BUS::outstanding_dump()
-{
-
-#ifdef DEBUG_AXI_BUS_PROGRESS
-	//typedef std::tuple<axi_trans_t, int8_t>
-	uint32_t id;
-	std::string out;
-	axi_trans_t trans;
-
-	out = "----------------------------------------------- outstanding dump begin\n";
-	for (auto iter: map_outstanding)
-	{
-		id = iter.first;
-		trans = iter.second;
-		out += ">>>>id=" + std::to_string(id) + ", " + transaction_to_string(trans);
-		out += "\n";
-	}
-	out += "----------------------------------------------- outstanding dump end\n";
-
-	std::cout << out;
-#endif
-
-	return;
 }

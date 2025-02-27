@@ -45,7 +45,7 @@ void AXI_MANAGER::fifo_receiver()
 		}
 	}
 
-	log_detail = AXI_BUS::transaction_to_string(trans);
+	log_detail = transaction_to_string(trans);
 	log(__FUNCTION__, "GOT RESPONSE", log_detail);
 }
 
@@ -95,7 +95,7 @@ void AXI_MANAGER::fifo_sender()
 	}
 
 	request.write(trans);
-	log_detail = AXI_BUS::transaction_to_string(trans);
+	log_detail = transaction_to_string(trans);
 	log(__FUNCTION__, "SENT REQUEST", log_detail);
 	queue_access.pop();
 }

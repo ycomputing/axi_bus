@@ -12,30 +12,7 @@
 #include <mutex>
 #include <unordered_map>
 #include "axi_param.h"
-
-typedef struct struct_axi_trans
-{
-	uint64_t	addr;
-	uint8_t		length;
-	bus_data_t	data[AXI_TRANSACTION_LENGTH_MAX];
-	bool		is_write;
-	uint8_t		progress;
-} axi_trans_t;
-
-// The following function is required by 6.23.3 of IEEE std 1666-2011
-inline std::ostream& operator<<(std::ostream& os, const struct_axi_trans& trans)
-{
-	return os;
-}
-
-typedef struct
-{
-	uint32_t	id;
-	uint64_t	addr;
-	uint8_t		len; // length - 1
-	bus_data_t	data;
-	bool		is_last;
-} axi_bus_info_t;
+#include "axi_outstanding.h"
 
 SC_MODULE(AXI_BUS)
 {
@@ -95,12 +72,20 @@ SC_MODULE(AXI_BUS)
 	// To access many queues from many threads, we need to use mutex
 	std::mutex mutex_q;
 	sc_event_queue event_something_to_send;
-	sc_event_queue event_outstanding_has_room;
+	sc_event_queue event_outstanding_R_has_room;
+	sc_event_queue event_outstanding_W_has_room;
 
-	std::unordered_map<uint32_t, axi_trans_t> map_outstanding;
+	// outstanding management
+	axi_outstanding outstanding_R;
+	axi_outstanding outstanding_W;
 
 	SC_CTOR(AXI_BUS)
 	{
+		outstanding_R.name = "R";
+		outstanding_R.is_write = false;
+		outstanding_W.name = "W";
+		outstanding_W.is_write = true;
+		
 		SC_THREAD(thread_clock);
 		sensitive << ACLK << ARESETn;
 		SC_THREAD(thread_request_M);
@@ -126,15 +111,14 @@ SC_MODULE(AXI_BUS)
 
 	static std::string get_channel_name(int channel);
 	
+	bool is_address(int channel);
 	bool is_ready(int channel);
 	bool is_valid(int channel);
 	void set_ready(int channel, bool value);
 	void set_valid(int channel, bool value);
+	bool is_recv_full(int channel);
 
 	void channel_transaction();
-
-	static std::string transaction_to_string(const axi_trans_t& trans);
-	static std::string bus_info_to_string(const axi_bus_info_t& info);
 
 	void transaction_request_M();
 	void transaction_response_S();

@@ -46,7 +46,7 @@ void AXI_SUBORDINATE::fifo_reader()
 
 	// Receive incoming requests. This is a blocking read.
 	trans = request.read();
-	log(__FUNCTION__, "GOT_REQUEST", AXI_BUS::transaction_to_string(trans));
+	log(__FUNCTION__, "GOT_REQUEST", transaction_to_string(trans));
 
 	latency_ns = get_latency_ns(trans);
 	// +0.5 is needed for rounding
@@ -59,7 +59,7 @@ void AXI_SUBORDINATE::fifo_reader()
 
 	log_detail = "scheduled=" + std::to_string(stamp_schedule_ns);
 	log_detail += ", latency=" + std::to_string(latency_ns);
-	log_detail += ", " + AXI_BUS::transaction_to_string(trans);
+	log_detail += ", " + transaction_to_string(trans);
 	log(__FUNCTION__, "SCHEDULE_RESPONSE", log_detail);
 }
 
@@ -114,13 +114,13 @@ void AXI_SUBORDINATE::fifo_writer()
 			}
 			else
 			{
-				SC_REPORT_FATAL("Address out of range", AXI_BUS::transaction_to_string(trans).c_str());
+				SC_REPORT_FATAL("Address out of range", transaction_to_string(trans).c_str());
 			}
 		}
 	}
 
 	response.write(trans);
-	log(__FUNCTION__, "SENT_RESPONSE", AXI_BUS::transaction_to_string(trans));
+	log(__FUNCTION__, "SENT_RESPONSE", transaction_to_string(trans));
 }
 
 int AXI_SUBORDINATE::get_latency_ns(axi_trans_t trans)
