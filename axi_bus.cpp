@@ -316,7 +316,7 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 		}
 	}
 
-size	log_detail = "recvQ=" + std::to_string(size_q);
+	log_detail = "recvQ=" + std::to_string(size_q);
 	log(channel, log_action, log_detail);
 
 	// keep asking to send
