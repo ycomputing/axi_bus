@@ -9,12 +9,12 @@ public:
 	std::unordered_map<uint32_t, axi_trans_t> map;
 	std::mutex mutex;
 	
-	const int FAIL = 0;
-	const int OK = 1;
-	const int OK_LAST = 2;
-	const int NO_SUCH_ID = 3;
-	const int PREMATURE_LAST = 4;
-	const int OVERFLOW = 5;
+	static const int FAIL = 0;
+	static const int OK = 1;
+	static const int OK_LAST = 2;
+	static const int NO_SUCH_ID = 3;
+	static const int PREMATURE_LAST = 4;
+	static const int OVERFLOW = 5;
 
 	std::string name;
 	bool is_write;

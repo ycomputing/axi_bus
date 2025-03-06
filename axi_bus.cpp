@@ -12,6 +12,7 @@ using namespace sc_core;
 using namespace sc_dt;
 
 #include "axi_bus.h"
+#include "axi_outstanding.h"
 
 // when you want to enable debug messages
 // (comment out or) uncomment the following line.
@@ -315,7 +316,7 @@ void AXI_BUS::channel_receiver(int channel, std::queue<axi_bus_info_t>& q)
 		}
 	}
 
-	log_detail = "recvQ=" + std::to_string(size_q);
+size	log_detail = "recvQ=" + std::to_string(size_q);
 	log(channel, log_action, log_detail);
 
 	// keep asking to send
@@ -438,6 +439,22 @@ std::string AXI_BUS::get_channel_name(int channel)
 
 void AXI_BUS::channel_transaction()
 {
+	log(__FUNCTION__, "======================BEGIN", "");
+	std::string log_detail;
+	mutex_q.lock();
+	log_detail = "RECV AW=" + std::to_string(q_recv_AW.size());
+	log_detail += ", W=" + std::to_string(q_recv_W.size());
+	log_detail += ", B=" + std::to_string(q_recv_B.size());
+	log_detail += ", AR=" + std::to_string(q_recv_AR.size());
+	log_detail += ", R=" + std::to_string(q_recv_R.size());
+	log_detail += ", SEND AW=" + std::to_string(q_send_AW.size());
+	log_detail += ", W=" + std::to_string(q_send_W.size());
+	log_detail += ", B=" + std::to_string(q_send_B.size());
+	log_detail += ", AR=" + std::to_string(q_send_AR.size());
+	log_detail += ", R=" + std::to_string(q_send_R.size());
+	log(__FUNCTION__, "Q_SIZE", log_detail);
+	mutex_q.unlock();
+
 	channel_receiver(CHANNEL_AW, q_recv_AW);
 	channel_receiver(CHANNEL_W, q_recv_W);
 	channel_receiver(CHANNEL_AR, q_recv_AR);
@@ -538,7 +555,7 @@ void AXI_BUS::transaction_response_S()
 	else
 	{
 		// read
-		iter = outstanding_W.find_by_addr(trans.addr);
+		iter = outstanding_R.find_by_addr(trans.addr);
 		if (iter != outstanding_R.map.end())
 		{
 			info = create_null_info();
@@ -590,12 +607,20 @@ void AXI_BUS::transaction_response_M()
 	else
 	{
 		info = q_recv_R.front();
-		bool is_completed = outstanding_R.update(info);
-		if (is_completed)
+		int state_update = outstanding_R.update(info);
+		if (state_update == axi_outstanding::OK)
+		{
+			// do nothing
+		}
+		else if (state_update == axi_outstanding::OK_LAST)
 		{
 			log_detail = transaction_send_info(response_M, info);
 			log(__FUNCTION__, "SENT RESPONSE", log_detail);
 			outstanding_R.remove(info.id);
+		}
+		else
+		{
+			log(__FUNCTION__, "ERROR", "state_update=" + std::to_string(state_update));
 		}
 		q_recv_R.pop();
 		mutex_q.unlock();
@@ -630,13 +655,20 @@ void AXI_BUS::transaction_request_S()
 		axi_bus_info_t info = q_recv_W.front();
 		if (outstanding_W.is_id_present(info.id))
 		{
-			bool is_completed = outstanding_W.update(q_recv_W.front());
-			if (is_completed)
+			int state_update = outstanding_W.update(info);
+			if (state_update == axi_outstanding::OK)
 			{
-				axi_bus_info_t info = q_recv_W.front();
-				q_recv_W.pop();
+				// do nothing
+			}
+			else if (state_update == axi_outstanding::OK_LAST)
+			{
 				transaction_send_info(request_S, info);
 			}
+			else
+			{
+				log(__FUNCTION__, "ERROR", "state_update=" + std::to_string(state_update));
+			}
+			q_recv_W.pop();
 		}
 		else
 		{
@@ -702,22 +734,22 @@ bool AXI_BUS::is_recv_full(int channel)
 	int vacancy = 0;
 	switch (channel)
 	{
-		case CHANNEL_AW:	vacancy = outstanding_W.size_vacant();
+		case CHANNEL_AW:	//vacancy = outstanding_W.size_vacant();
 							size = q_recv_AW.size();
-							if (vacancy <= size)
+							if (AXI_BUS_Q_SIZE_RECV <= size)
 							{
 								is_full = true;
 							}
 							break;
-		case CHANNEL_AR:	vacancy = outstanding_R.size_vacant();
+		case CHANNEL_AR:	// vacancy = outstanding_R.size_vacant();
 							size = q_recv_AR.size();
-							if (vacancy <= size)
+							if (AXI_BUS_Q_SIZE_RECV <= size)
 							{
 								is_full = true;
 							}
 							break;
-		case CHANNEL_W:
-		case CHANNEL_B:
+		case CHANNEL_W:	break;
+		case CHANNEL_B:	break;
 		case CHANNEL_R:		is_full = false;
 							break;
 		default:

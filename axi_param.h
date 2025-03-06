@@ -22,7 +22,7 @@ typedef sc_dt::sc_bigint<DATA_WIDTH> bus_data_t;
 
 // maximum number of entries in the progress
 // how many outstanding transactions can be
-#define AXI_BUS_OUTSTANDING_MAX	2
+#define AXI_BUS_OUTSTANDING_MAX	20
 
 // channel id
 #define CHANNEL_AW		1
