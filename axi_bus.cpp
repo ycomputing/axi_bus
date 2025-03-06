@@ -519,9 +519,7 @@ void AXI_BUS::transaction_response_S()
 
 	mutex_q.lock();
 
-	uint32_t id;
 	axi_trans_t trans_outstanding;
-	bool found = false;
 	std::unordered_map<uint32_t, axi_trans_t>::iterator iter;
 
 	if (trans.is_write)
@@ -530,7 +528,7 @@ void AXI_BUS::transaction_response_S()
 		if (iter != outstanding_R.map.end())
 		{
 			info = create_null_info();
-			info.id = id;
+			info.id = iter->first;
 			info.addr = trans.addr;
 			info.len = trans.length - 1;
 			q_send_B.push(info);
@@ -544,7 +542,7 @@ void AXI_BUS::transaction_response_S()
 		if (iter != outstanding_R.map.end())
 		{
 			info = create_null_info();
-			info.id = id;
+			info.id = iter->first;
 			info.addr = trans.addr;
 			info.len = trans.length - 1;
 			info.is_last = false;
